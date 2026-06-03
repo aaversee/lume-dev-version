@@ -45,7 +45,7 @@
     "@types/web-push": "^3.6.4",
     "@types/ws": "^8.5.10",
     "@typescript-eslint/eslint-plugin": "^8.57.2",
-    "@typescript-eslint/parser": "^8.57.1",
+    "@typescript-eslint/parser": "^8.60.1",
     "autocannon": "^8.0.0",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.1.8",
