@@ -30,7 +30,7 @@
     "tweetnacl-util": "^0.15.1",
     "uuid": "^13.0.0",
     "web-push": "^3.6.7",
-    "ws": "^8.16.0",
+    "ws": "^8.21.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
