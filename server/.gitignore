@@ -13,6 +13,7 @@ dist/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/uploads/
 
 # OS
 .DS_Store
