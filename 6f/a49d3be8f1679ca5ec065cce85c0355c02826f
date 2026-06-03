@@ -1,0 +1,19 @@
+.github/workflows/ci.yml
+  s_5a7e53f7a98baa::t_3adcd1d272f7cb 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "6fa49d3be8f1679ca5ec065cce85c0355c02826f",
+  "prompts": {},
+  "sessions": {
+    "s_5a7e53f7a98baa": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0bf07eb7-0f49-41f5-8889-d9e9e0db810d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "rekonov <rekonov@users.noreply.github.com>"
+    }
+  }
+}
