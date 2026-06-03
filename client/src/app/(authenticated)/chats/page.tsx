@@ -209,12 +209,16 @@ export default function ChatsPage() {
 
   return (
     <div className="h-[100dvh] w-full overflow-hidden">
-      {/* Mobile: swipeable Profile + Messages panels */}
+      {/* Mobile: group chat full-screen when active, else swipeable Profile + Messages panels */}
       <div className="md:hidden h-full min-h-0 p-2 sm:p-3">
-        <MobileSwipeShell
-          profilePanel={leftRailNode}
-          chatListPanel={chatListNode}
-        />
+        {activeGroup ? (
+          <GroupView group={activeGroup} />
+        ) : (
+          <MobileSwipeShell
+            profilePanel={leftRailNode}
+            chatListPanel={chatListNode}
+          />
+        )}
       </div>
 
       {/* Desktop: 4-column dashboard like the reference */}

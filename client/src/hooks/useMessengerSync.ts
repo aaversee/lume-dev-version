@@ -16,6 +16,7 @@ import {
   useSessionsStore,
   useUIStore,
   useBlockedStore,
+  useGroupsStore,
   type MessageAttachment,
 } from "@/stores";
 import {
@@ -24,10 +25,12 @@ import {
   loadSettings,
   loadPreKeyMaterial,
   loadRatchetSessions,
+  loadGroupMessages,
   saveChats,
   saveContacts,
   savePreKeyMaterial,
   saveRatchetSessions,
+  saveGroupMessages,
   consumeOneTimePreKey,
   type Contact,
   hasAccount,
@@ -266,6 +269,7 @@ async function appendIncomingMessage(params: {
     | { messageId: string; content: string; senderId: string }
     | undefined;
   let attachment: MessageAttachment | undefined;
+  let groupId: string | undefined;
 
   if (ratchetEnvelope) {
     // v2: X3DH + Double Ratchet (lume-ratchet)
@@ -356,6 +360,7 @@ async function appendIncomingMessage(params: {
         selfDestruct?: unknown;
         replyTo?: unknown;
         attachment?: unknown;
+        groupId?: unknown;
       };
       if (typeof decoded.content === "string") {
         content = decoded.content;
@@ -409,6 +414,9 @@ async function appendIncomingMessage(params: {
           };
         }
       }
+      if (typeof decoded.groupId === "string") {
+        groupId = decoded.groupId;
+      }
     } catch {
       timestamp = ratchetEnvelope.timestamp ?? fallbackTimestamp;
       selfDestructSeconds = ratchetEnvelope.selfDestruct ?? null;
@@ -441,6 +449,39 @@ async function appendIncomingMessage(params: {
   // but we silently discard the message (no chat entry, no notification).
   if (isBlockedSender) return true;
 
+  const msgType = attachment
+    ? attachment.mimeType.startsWith("image/")
+      ? "image"
+      : "file"
+    : "text";
+
+  const selfDestructAt = selfDestructSeconds
+    ? timestamp + selfDestructSeconds * 1000
+    : undefined;
+
+  // Group message: routed by groupId carried inside the encrypted payload.
+  // The sender is authenticated by the 1:1 ratchet session used to decrypt it.
+  if (groupId) {
+    const { activeGroupId, addGroupMessage } = useGroupsStore.getState();
+    addGroupMessage(
+      groupId,
+      {
+        id: messageId,
+        chatId: groupId,
+        senderId,
+        content,
+        type: msgType,
+        timestamp,
+        status: "delivered",
+        selfDestructAt,
+        replyTo,
+        attachment,
+      },
+      groupId !== activeGroupId,
+    );
+    return true;
+  }
+
   const allChats = useChatsStore.getState().chats;
   let targetChat = allChats.find((c) => c.contactId === senderId);
   if (!targetChat) {
@@ -460,16 +501,6 @@ async function appendIncomingMessage(params: {
       isHidden: false,
     };
   }
-
-  const msgType = attachment
-    ? attachment.mimeType.startsWith("image/")
-      ? "image"
-      : "file"
-    : "text";
-
-  const selfDestructAt = selfDestructSeconds
-    ? timestamp + selfDestructSeconds * 1000
-    : undefined;
 
   useChatsStore.getState().addMessage(targetChat.id, {
     id: messageId,
@@ -553,6 +584,7 @@ export function useMessengerSync() {
     let saveChatsTimer: ReturnType<typeof setTimeout> | null = null;
     let saveContactsTimer: ReturnType<typeof setTimeout> | null = null;
     let saveSessionsTimer: ReturnType<typeof setTimeout> | null = null;
+    let saveGroupMessagesTimer: ReturnType<typeof setTimeout> | null = null;
 
     const loadLocalContacts = async () => {
       const mk = vaultGetMasterKey();
@@ -597,6 +629,12 @@ export function useMessengerSync() {
       const mk = vaultGetMasterKey();
       const loaded = await loadRatchetSessions(mk);
       if (isMounted) setSessions(loaded);
+    };
+
+    const loadLocalGroupMessages = async () => {
+      const mk = vaultGetMasterKey();
+      const loaded = await loadGroupMessages(mk);
+      if (isMounted) useGroupsStore.getState().setGroupMessagesAll(loaded);
     };
 
     const scheduleChatsPersist = () => {
@@ -659,9 +697,31 @@ export function useMessengerSync() {
       }
     });
 
+    const scheduleGroupMessagesPersist = () => {
+      if (saveGroupMessagesTimer) {
+        clearTimeout(saveGroupMessagesTimer);
+      }
+      saveGroupMessagesTimer = setTimeout(() => {
+        saveGroupMessagesTimer = null;
+        try {
+          const mk = vaultGetMasterKey();
+          const latest = useGroupsStore.getState().messagesByGroup;
+          saveGroupMessages(latest, mk).catch(console.error);
+        } catch {
+          /* vault cleared during cleanup — skip persist */
+        }
+      }, 600);
+    };
+
     const unsubscribeSessions = vaultSubscribeSessionChanges(() =>
       scheduleSessionsPersist(),
     );
+
+    const unsubscribeGroupMessages = useGroupsStore.subscribe((state, prev) => {
+      if (state.messagesByGroup !== prev.messagesByGroup) {
+        scheduleGroupMessagesPersist();
+      }
+    });
 
     const syncPendingMessages = async () => {
       if (!vaultHasKeys() || !userId) return;
@@ -731,6 +791,7 @@ export function useMessengerSync() {
     void loadLocalContacts();
     void loadLocalChats();
     void loadLocalSessions();
+    void loadLocalGroupMessages();
     void connectWs();
     initSoundPreference();
 
@@ -785,6 +846,7 @@ export function useMessengerSync() {
       unsubscribeChats();
       unsubscribeContacts();
       unsubscribeSessions();
+      unsubscribeGroupMessages();
       unsubscribeBlocked();
 
       // Flush any pending debounced writes before unmounting
@@ -807,11 +869,20 @@ export function useMessengerSync() {
           saveSessionsTimer = null;
           saveRatchetSessions(vaultGetAllSessions(), mk).catch(console.error);
         }
+        if (saveGroupMessagesTimer) {
+          clearTimeout(saveGroupMessagesTimer);
+          saveGroupMessagesTimer = null;
+          saveGroupMessages(
+            useGroupsStore.getState().messagesByGroup,
+            mk,
+          ).catch(console.error);
+        }
       } catch {
         // Vault already cleared (logout) — cancel timers, skip persist
         if (saveChatsTimer) clearTimeout(saveChatsTimer);
         if (saveContactsTimer) clearTimeout(saveContactsTimer);
         if (saveSessionsTimer) clearTimeout(saveSessionsTimer);
+        if (saveGroupMessagesTimer) clearTimeout(saveGroupMessagesTimer);
       }
     };
   }, [
