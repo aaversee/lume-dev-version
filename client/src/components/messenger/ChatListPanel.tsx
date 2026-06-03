@@ -140,10 +140,12 @@ const GroupRow = memo(function GroupRow({
   group,
   selected,
   onClick,
+  unread = 0,
 }: {
   group: GroupData;
   selected: boolean;
   onClick: () => void;
+  unread?: number;
 }) {
   return (
     <button
@@ -183,6 +185,11 @@ const GroupRow = memo(function GroupRow({
                 {group.members.length} {group.members.length === 1 ? 'member' : 'members'}
               </p>
             </div>
+            {unread > 0 ? (
+              <span className="min-w-5 h-5 px-1.5 rounded-full text-[11px] font-semibold flex items-center justify-center bg-[var(--accent)] text-[var(--accent-contrast)] flex-shrink-0">
+                {unread > 9 ? '9+' : unread}
+              </span>
+            ) : null}
           </div>
         </div>
       </div>
@@ -192,7 +199,8 @@ const GroupRow = memo(function GroupRow({
   prev.group.id === next.group.id &&
   prev.group.name === next.group.name &&
   prev.group.members.length === next.group.members.length &&
-  prev.selected === next.selected
+  prev.selected === next.selected &&
+  prev.unread === next.unread
 );
 
 export default function ChatListPanel({
@@ -223,6 +231,7 @@ export default function ChatListPanel({
   const groups = useGroupsStore((s) => s.groups);
   const activeGroupId = useGroupsStore((s) => s.activeGroupId);
   const setActiveGroup = useGroupsStore((s) => s.setActiveGroup);
+  const unreadByGroup = useGroupsStore((s) => s.unreadByGroup);
 
   const [activeTab, setActiveTab] = useState<'chats' | 'groups'>('chats');
   const [hiddenChatsEnabled, setHiddenChatsEnabled] = useState(false);
@@ -552,6 +561,7 @@ export default function ChatListPanel({
                   group={group}
                   selected={activeGroupId === group.id}
                   onClick={() => handleSelectGroup(group.id)}
+                  unread={unreadByGroup[group.id] ?? 0}
                 />
               </div>
             ))
