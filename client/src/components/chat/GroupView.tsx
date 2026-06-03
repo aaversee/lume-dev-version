@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { v4 as uuidv4 } from "uuid";
 import { groupsApi } from "@/lib/api";
 import type { GroupData } from "@/lib/api";
-import { useAuthStore, useGroupsStore } from "@/stores";
+import { useAuthStore, useGroupsStore, type Message } from "@/stores";
 import { Button } from "@/components/ui";
-import { vaultHasKeys } from "@/crypto/keyVault";
 import { Avatar } from "@/components/ui/Avatar";
+import { MessageBubbleMemo } from "./MessageBubble";
+import { vaultHasKeys } from "@/crypto/keyVault";
+import { sendGroupMessage } from "@/lib/groupMessaging";
 import AddMemberModal from "@/components/modals/AddMemberModal";
 
 interface GroupViewProps {
@@ -18,14 +21,109 @@ export default function GroupView({ group }: GroupViewProps) {
   const updateGroup = useGroupsStore((s) => s.updateGroup);
   const removeGroup = useGroupsStore((s) => s.removeGroup);
   const setActiveGroup = useGroupsStore((s) => s.setActiveGroup);
+  const messages = useGroupsStore((s) => s.messagesByGroup[group.id]);
+  const addGroupMessage = useGroupsStore((s) => s.addGroupMessage);
+  const updateGroupMessage = useGroupsStore((s) => s.updateGroupMessage);
+  const deleteGroupMessage = useGroupsStore((s) => s.deleteGroupMessage);
+  const markGroupRead = useGroupsStore((s) => s.markGroupRead);
+
+  const [mode, setMode] = useState<"chat" | "info">("chat");
+  const [messageText, setMessageText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
 
   const [showAddMember, setShowAddMember] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [leavingGroup, setLeavingGroup] = useState(false);
   const [error, setError] = useState("");
 
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
   const currentMember = group.members.find((m) => m.user_id === userId);
   const isAdmin = currentMember?.role === "admin";
+  const hasMembersToSend = group.members.some((m) => m.user_id !== userId);
+
+  const groupMessages = useMemo(() => messages ?? [], [messages]);
+
+  const usernameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const m of group.members) map[m.user_id] = m.username;
+    return map;
+  }, [group.members]);
+
+  // Reading the group clears its unread badge (and keeps it cleared as messages arrive).
+  useEffect(() => {
+    markGroupRead(group.id);
+  }, [group.id, groupMessages.length, markGroupRead]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+  }, [groupMessages.length]);
+
+  const handleDeleteMessage = useCallback(
+    (messageId: string) => {
+      deleteGroupMessage(group.id, messageId);
+    },
+    [deleteGroupMessage, group.id],
+  );
+
+  const handleReply = useCallback((message: Message) => {
+    setReplyingTo(message);
+  }, []);
+
+  const handleSend = async () => {
+    const text = messageText.trim();
+    if (!text || !userId || !hasMembersToSend || !vaultHasKeys()) return;
+
+    setSending(true);
+    const messageId = uuidv4();
+    const timestamp = Date.now();
+    const replyRef = replyingTo
+      ? {
+          messageId: replyingTo.id,
+          content: replyingTo.content.slice(0, 200),
+          senderId: replyingTo.senderId,
+        }
+      : undefined;
+
+    // Optimistic local echo
+    addGroupMessage(group.id, {
+      id: messageId,
+      chatId: group.id,
+      senderId: userId,
+      content: text,
+      type: "text",
+      timestamp,
+      status: "sending",
+      replyTo: replyRef,
+    });
+    setMessageText("");
+    setReplyingTo(null);
+
+    try {
+      const result = await sendGroupMessage({
+        group,
+        senderId: userId,
+        content: text,
+        timestamp,
+        replyTo: replyRef,
+      });
+      updateGroupMessage(group.id, messageId, {
+        status: result.sent > 0 ? "sent" : "failed",
+      });
+    } catch {
+      updateGroupMessage(group.id, messageId, { status: "failed" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void handleSend();
+    }
+  };
 
   const handleRemoveMember = async (memberUserId: string) => {
     if (!vaultHasKeys()) return;
@@ -97,122 +195,248 @@ export default function GroupView({ group }: GroupViewProps) {
             </p>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => setMode((m) => (m === "chat" ? "info" : "chat"))}
+          className="lume-icon-btn flex-shrink-0"
+          aria-label={mode === "chat" ? "Group info" : "Back to chat"}
+          title={mode === "chat" ? "Group info" : "Back to chat"}
+        >
+          {mode === "chat" ? (
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <circle cx="12" cy="12" r="9" strokeWidth="1.8" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 16v-4M12 8h.01" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4v8z" />
+            </svg>
+          )}
+        </button>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
-        {error && (
-          <div className="mb-4 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-strong)]">
-            <p className="text-[12px] text-[var(--text-secondary)]">{error}</p>
-          </div>
-        )}
+      {mode === "chat" ? (
+        <>
+          {/* Messages */}
+          <main className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-5 md:px-6 py-4 sm:py-5 space-y-2">
+            {groupMessages.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center px-6">
+                <p className="text-[13px] font-semibold text-[var(--text-primary)]">
+                  No messages yet
+                </p>
+                <p className="mt-1 text-[12px] text-[var(--text-muted)]">
+                  Send the first message to the group.
+                </p>
+              </div>
+            ) : (
+              <>
+                {groupMessages.map((m) => {
+                  const isMine = m.senderId === userId;
+                  const senderName = usernameById[m.senderId] || "Unknown";
+                  let replyAuthorName: string | undefined;
+                  if (m.replyTo) {
+                    replyAuthorName =
+                      m.replyTo.senderId === userId
+                        ? "You"
+                        : usernameById[m.replyTo.senderId] || "Unknown";
+                  }
+                  return (
+                    <div key={m.id}>
+                      {!isMine && (
+                        <p className="px-1 mb-0.5 text-[11px] text-[var(--text-muted)]">
+                          @{senderName}
+                        </p>
+                      )}
+                      <MessageBubbleMemo
+                        message={m}
+                        isMine={isMine}
+                        onDelete={handleDeleteMessage}
+                        onReply={handleReply}
+                        replyAuthorName={replyAuthorName}
+                      />
+                    </div>
+                  );
+                })}
+                <div ref={messagesEndRef} />
+              </>
+            )}
+          </main>
 
-        {/* Members section */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-              Members
-            </h3>
-            {isAdmin && (
+          {/* Input */}
+          <footer className="px-3 sm:px-5 md:px-6 py-3 sm:py-4 border-t border-[var(--border)]/70">
+            {replyingTo && (
+              <div className="mb-3 flex items-start gap-3 px-4 py-2.5 rounded-[var(--radius-md)] bg-[var(--surface-alt)] border border-[var(--border)]">
+                <div className="flex-1 min-w-0 pl-3 border-l-2 border-[var(--accent)]">
+                  <p className="text-[11px] font-semibold text-[var(--accent)] uppercase tracking-[0.06em] mb-0.5">
+                    {replyingTo.senderId === userId
+                      ? "You"
+                      : usernameById[replyingTo.senderId] || "Unknown"}
+                  </p>
+                  <p className="text-[12px] text-[var(--text-secondary)] truncate">
+                    {replyingTo.content.length > 100
+                      ? replyingTo.content.slice(0, 100) + "\u2026"
+                      : replyingTo.content}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReplyingTo(null)}
+                  className="flex-shrink-0 p-1 rounded-full hover:bg-[var(--surface-strong)] transition-colors"
+                  aria-label="Cancel reply"
+                >
+                  <svg className="w-4 h-4 text-[var(--text-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <textarea
+                  value={messageText}
+                  onChange={(e) => setMessageText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={hasMembersToSend ? "Type message..." : "Add members to start chatting"}
+                  rows={1}
+                  maxLength={10000}
+                  disabled={!hasMembersToSend}
+                  aria-label="Group message input"
+                  className="w-full px-4 py-3 bg-[var(--surface-strong)] rounded-full border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] resize-none shadow-[var(--shadow-sm)] text-[16px] leading-snug disabled:opacity-60"
+                  style={{ minHeight: "48px", maxHeight: "140px" }}
+                />
+              </div>
               <button
                 type="button"
-                onClick={() => setShowAddMember(true)}
-                className="lume-icon-btn"
-                aria-label="Add member"
-                title="Add member"
+                onClick={() => void handleSend()}
+                disabled={!messageText.trim() || sending || !hasMembersToSend}
+                className="w-12 h-12 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] border border-[var(--border)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center flex-shrink-0 shadow-[var(--shadow-sm)]"
+                aria-label="Send"
+                title="Send"
               >
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2" />
-                  <circle cx="8.5" cy="7" r="4" strokeWidth="1.8" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M20 8v6M23 11h-6" />
-                </svg>
+                {sending ? (
+                  <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                )}
               </button>
-            )}
-          </div>
+            </div>
+          </footer>
+        </>
+      ) : (
+        /* Info / members */
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
+          {error && (
+            <div className="mb-4 px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-strong)]">
+              <p className="text-[12px] text-[var(--text-secondary)]">{error}</p>
+            </div>
+          )}
 
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] overflow-hidden">
-            {group.members.map((member) => {
-              const isSelf = member.user_id === userId;
-              const memberIsAdmin = member.role === "admin";
-              const canRemove = isAdmin && !memberIsAdmin && !isSelf;
-              const isRemoving = removingId === member.user_id;
-
-              return (
-                <div
-                  key={member.user_id}
-                  className="px-4 py-3 flex items-center gap-3 border-b border-[var(--border)]/40 last:border-b-0"
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                Members
+              </h3>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setShowAddMember(true)}
+                  className="lume-icon-btn"
+                  aria-label="Add member"
+                  title="Add member"
                 >
-                  <Avatar username={member.username} size="sm" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13px] text-[var(--text-primary)] truncate">
-                        @{member.username}
-                      </span>
-                      {isSelf && (
-                        <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-[0.1em]">
-                          you
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2" />
+                    <circle cx="8.5" cy="7" r="4" strokeWidth="1.8" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M20 8v6M23 11h-6" />
+                  </svg>
+                </button>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] overflow-hidden">
+              {group.members.map((member) => {
+                const isSelf = member.user_id === userId;
+                const memberIsAdmin = member.role === "admin";
+                const canRemove = isAdmin && !memberIsAdmin && !isSelf;
+                const isRemoving = removingId === member.user_id;
+
+                return (
+                  <div
+                    key={member.user_id}
+                    className="px-4 py-3 flex items-center gap-3 border-b border-[var(--border)]/40 last:border-b-0"
+                  >
+                    <Avatar username={member.username} size="sm" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[13px] text-[var(--text-primary)] truncate">
+                          @{member.username}
+                        </span>
+                        {isSelf && (
+                          <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-[0.1em]">
+                            you
+                          </span>
+                        )}
+                      </div>
+                      {memberIsAdmin && (
+                        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--accent)]">
+                          Admin
                         </span>
                       )}
                     </div>
-                    {memberIsAdmin && (
-                      <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--accent)]">
-                        Admin
-                      </span>
+                    {canRemove && (
+                      <button
+                        type="button"
+                        onClick={() => void handleRemoveMember(member.user_id)}
+                        disabled={isRemoving}
+                        className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50"
+                        aria-label={`Remove ${member.username}`}
+                        title={`Remove ${member.username}`}
+                      >
+                        {isRemoving ? (
+                          <div className="w-4 h-4 border-2 mono-spinner rounded-full animate-spin" />
+                        ) : (
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        )}
+                      </button>
                     )}
                   </div>
-                  {canRemove && (
-                    <button
-                      type="button"
-                      onClick={() => void handleRemoveMember(member.user_id)}
-                      disabled={isRemoving}
-                      className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50"
-                      aria-label={`Remove ${member.username}`}
-                      title={`Remove ${member.username}`}
-                    >
-                      {isRemoving ? (
-                        <div className="w-4 h-4 border-2 mono-spinner rounded-full animate-spin" />
-                      ) : (
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      )}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Group info */}
-        <div className="mb-6">
-          <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)] mb-3">
-            Info
-          </h3>
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] px-4 py-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[12px] text-[var(--text-muted)]">Created</span>
-              <span className="text-[12px] text-[var(--text-secondary)]">
-                {new Date(group.created_at).toLocaleDateString("en-US", {
-                  day: "numeric",
-                  month: "short",
-                  year: "numeric",
-                })}
-              </span>
+                );
+              })}
             </div>
           </div>
-        </div>
 
-        {/* Leave group */}
-        <Button
-          variant="danger"
-          fullWidth
-          onClick={() => void handleLeaveGroup()}
-          loading={leavingGroup}
-        >
-          Leave Group
-        </Button>
-      </div>
+          <div className="mb-6">
+            <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)] mb-3">
+              Info
+            </h3>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-strong)] px-4 py-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] text-[var(--text-muted)]">Created</span>
+                <span className="text-[12px] text-[var(--text-secondary)]">
+                  {new Date(group.created_at).toLocaleDateString("en-US", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <Button
+            variant="danger"
+            fullWidth
+            onClick={() => void handleLeaveGroup()}
+            loading={leavingGroup}
+          >
+            Leave Group
+          </Button>
+        </div>
+      )}
 
       <AddMemberModal
         isOpen={showAddMember}

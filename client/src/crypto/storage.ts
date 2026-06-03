@@ -8,7 +8,7 @@ import nacl from "tweetnacl";
 import { encodeBase64, decodeBase64 } from "tweetnacl-util";
 import type { IdentityKeys, KeyPair } from "./keys";
 import type { SerializedSession } from "./ratchet";
-import type { Chat } from "@/stores";
+import type { Chat, Message } from "@/stores";
 
 const STORAGE_KEYS = {
   IDENTITY: "identity_keys",
@@ -22,6 +22,7 @@ const STORAGE_KEYS = {
   HIDDEN_CHAT_PIN: "hidden_chat_pin",
   LOCKOUT: "lockout_state",
   CHANGEPIN_BACKUP: "changepin_backup",
+  GROUP_MESSAGES: "group_messages",
 } as const;
 
 interface EncryptedDataV1 {
@@ -443,6 +444,44 @@ export async function loadChats(masterKey: Uint8Array): Promise<Chat[]> {
   } catch {
     await del(STORAGE_KEYS.CHATS);
     return [];
+  }
+}
+
+// ==================== Group Messages ====================
+
+export async function saveGroupMessages(
+  messagesByGroup: Record<string, Message[]>,
+  masterKey: Uint8Array,
+): Promise<void> {
+  const data = JSON.stringify(messagesByGroup);
+  const encrypted = encryptWithKey(data, masterKey);
+  await set(STORAGE_KEYS.GROUP_MESSAGES, encrypted);
+}
+
+export async function loadGroupMessages(
+  masterKey: Uint8Array,
+): Promise<Record<string, Message[]>> {
+  const encrypted = await get<EncryptedData>(STORAGE_KEYS.GROUP_MESSAGES);
+
+  if (!encrypted) {
+    return {};
+  }
+
+  const decrypted = await decryptFromStorage(encrypted, masterKey);
+
+  if (!decrypted) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(decrypted) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, Message[]>;
+    }
+    return {};
+  } catch {
+    await del(STORAGE_KEYS.GROUP_MESSAGES);
+    return {};
   }
 }
 
