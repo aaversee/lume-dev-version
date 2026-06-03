@@ -35,7 +35,7 @@ Self-destruct         Messages auto-delete after a set time
 Panic wipe            Erase all local data in one tap
 Hidden chats          Separate PIN to access private conversations
 File sharing          Attachments up to 5 MB, end-to-end encrypted
-Group chats           Roles, permissions, encrypted for all members
+Group chats           Create groups, assign roles and manage members
 Seed phrase           Recover your identity on any device
 Offline delivery      Messages queue for up to 30 days
 ```
@@ -59,7 +59,7 @@ Infra      Vercel  ·  Render  ·  GitHub Actions  ·  Docker
 <br>
 
 ```bash
-git clone https://github.com/umaiw/LUME.git && cd LUME
+git clone https://github.com/aaversee/lume-dev-version.git && cd lume-dev-version
 
 # server
 cd server && cp .env.example .env && npm i && npm run dev

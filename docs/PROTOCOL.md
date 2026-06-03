@@ -16,7 +16,7 @@ LUME is an end-to-end encrypted messaging system. The server is a relay -- it st
 
 **WebSocket path:** `ws://<host>:<port>/ws`
 
-**JSON body limit:** `256kb` (configurable via `JSON_LIMIT` env var).
+**JSON body limit:** `8mb` (configurable via `JSON_LIMIT` env var). Large enough for base64-encoded file uploads (files are capped at 5 MB raw).
 
 **CORS:** Origin allowlist derived from `CLIENT_ORIGIN` env var. In production, state-changing requests (`POST`, `PUT`, `DELETE`, `PATCH`) require an `Origin` header.
 

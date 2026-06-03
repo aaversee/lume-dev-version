@@ -10,7 +10,9 @@ import {
   requestNotificationPermission,
   getNotificationPermission,
 } from "@/lib/notifications";
+import { subscribeToPush, unsubscribeFromPush } from "@/lib/pushSubscription";
 import { setSoundEnabled } from "@/lib/sounds";
+import { useAuthStore } from "@/stores";
 import { SectionHeading, ToggleRow } from "./shared";
 
 interface NotificationsSectionProps {
@@ -29,6 +31,7 @@ export default function NotificationsSection({
   const [browserPermission, setBrowserPermission] = useState(
     getNotificationPermission,
   );
+  const userId = useAuthStore((s) => s.userId);
 
   const handleToggle = useCallback(
     async (enabled: boolean) => {
@@ -38,9 +41,14 @@ export default function NotificationsSection({
           () => false,
         );
         setBrowserPermission(granted ? "granted" : getNotificationPermission());
+        if (granted && userId) {
+          void subscribeToPush(userId);
+        }
+      } else if (userId) {
+        void unsubscribeFromPush(userId);
       }
     },
-    [onUpdate],
+    [onUpdate, userId],
   );
 
   const permissionHint =

@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from "uuid";
 import { authApi, messagesApi } from "@/lib/api";
 import { wsClient } from "@/lib/websocket";
 import { notifyIncomingMessage } from "@/lib/notifications";
+import { subscribeToPush } from "@/lib/pushSubscription";
 import { playMessageSound, initSoundPreference } from "@/lib/sounds";
 import { reconcileSettingsConsistency } from "@/lib/settingsConsistency";
 import {
@@ -490,6 +491,31 @@ async function appendIncomingMessage(params: {
   return true;
 }
 
+type PersistHydration = {
+  persist?: {
+    hasHydrated?: () => boolean;
+  };
+};
+
+/**
+ * Returns true once the auth store has finished rehydrating from storage.
+ * Side-effect free — authenticated pages call this to gate rendering without
+ * triggering the full messenger sync, which now runs once in the authenticated
+ * layout via useMessengerSync().
+ */
+export function useHydrated(): boolean {
+  // Both snapshots use the same fallback so SSR and client agree when persist is absent.
+  return useSyncExternalStore(
+    (onStoreChange) => useAuthStore.subscribe(() => onStoreChange()),
+    () =>
+      (useAuthStore as unknown as PersistHydration).persist?.hasHydrated?.() ??
+      true,
+    () =>
+      (useAuthStore as unknown as PersistHydration).persist?.hasHydrated?.() ??
+      true,
+  );
+}
+
 export function useMessengerSync() {
   const router = useRouter();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -500,23 +526,7 @@ export function useMessengerSync() {
   const setChats = useChatsStore((s) => s.setChats);
   const setSessions = useSessionsStore((s) => s.setSessions);
 
-  type PersistHydration = {
-    persist?: {
-      hasHydrated?: () => boolean;
-    };
-  };
-
-  // Gate side-effects until auth store has finished rehydrating from storage.
-  // Both snapshots use the same fallback so SSR and client agree when persist is absent.
-  const hydrated = useSyncExternalStore(
-    (onStoreChange) => useAuthStore.subscribe(() => onStoreChange()),
-    () =>
-      (useAuthStore as unknown as PersistHydration).persist?.hasHydrated?.() ??
-      true,
-    () =>
-      (useAuthStore as unknown as PersistHydration).persist?.hasHydrated?.() ??
-      true,
-  );
+  const hydrated = useHydrated();
 
   useEffect(() => {
     if (!hydrated || isAuthenticated) return;
@@ -723,6 +733,23 @@ export function useMessengerSync() {
     void loadLocalSessions();
     void connectWs();
     initSoundPreference();
+
+    // Best-effort: refresh the push subscription on login when notifications are
+    // enabled and the browser already granted permission (no-op without VAPID).
+    void (async () => {
+      if (
+        typeof Notification === "undefined" ||
+        Notification.permission !== "granted"
+      ) {
+        return;
+      }
+      const mk = vaultHasMasterKey() ? vaultGetMasterKey() : undefined;
+      const settings = await loadSettings(mk).catch(() => null);
+      if (settings?.notifications) {
+        subscribeToPush(userId).catch(() => {});
+      }
+    })();
+
     void (async () => {
       const localBlocked = loadBlockedIds();
       useBlockedStore.getState().setBlockedIds(localBlocked);

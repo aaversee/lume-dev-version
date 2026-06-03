@@ -16,7 +16,7 @@ Public disclosure before a fix is available puts all users at risk.
 
 ### How to Report
 
-1. **GitHub Private Advisory** (preferred): [Report privately via GitHub](https://github.com/umaiw/LUME/security/advisories/new)
+1. **GitHub Private Advisory** (preferred): [Report privately via GitHub](https://github.com/aaversee/lume-dev-version/security/advisories/new)
 2. **Email**: Contact the maintainer directly via GitHub profile
 
 ### What to Include
@@ -76,7 +76,7 @@ LUME is designed so that a compromised server cannot compromise user privacy.
 | No passwords | Ed25519 signature-based auth |
 | Forward secrecy | X3DH + Double Ratchet — new key per message |
 | Client-side encryption | All crypto runs in the browser via TweetNaCl |
-| Keys encrypted at rest | IndexedDB + PBKDF2-derived master key (100K iterations) |
+| Keys encrypted at rest | IndexedDB + PBKDF2-derived master key (600K iterations) |
 | Anonymity | No phone, no email — username only, or fully anonymous via rotating invite links |
 | Panic Wipe | One action destroys all local data and server account |
 

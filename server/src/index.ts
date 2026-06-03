@@ -9,7 +9,7 @@ import { WebSocketServer } from 'ws'
 
 import authRoutes from './routes/auth'
 import messageRoutes from './routes/messages'
-import fileRoutes from './routes/files'
+import fileRoutes, { deleteFileBlobs } from './routes/files'
 import groupRoutes from './routes/groups'
 import pushRoutes from './routes/push'
 import profileRoutes from './routes/profile'
@@ -166,6 +166,10 @@ app.get('/api/metrics', (req, res) => {
     const providedToken =
       typeof token === 'string' ? token : Array.isArray(token) ? token[0] || '' : ''
     const expectedToken = String(process.env.METRICS_SECRET || '')
+    if (!expectedToken) {
+      res.status(403).json({ error: 'Forbidden' })
+      return
+    }
     const providedHash = crypto.createHash('sha256').update(providedToken).digest()
     const expectedHash = crypto.createHash('sha256').update(expectedToken).digest()
     if (!crypto.timingSafeEqual(providedHash, expectedHash)) {
@@ -236,11 +240,12 @@ const staleCleanupTimer = setInterval(() => {
 }, STALE_MSG_CLEANUP_INTERVAL)
 staleCleanupTimer.unref()
 
-// Purge expired files every minute
+// Purge expired files every minute (DB rows + on-disk blobs)
 const fileCleanupTimer = setInterval(() => {
-  const purgedFiles = database.purgeExpiredFiles(Math.floor(Date.now() / 1000))
-  if (purgedFiles > 0) {
-    console.log(`Purged ${purgedFiles} expired file(s)`)
+  const purgedIds = database.purgeExpiredFiles(Math.floor(Date.now() / 1000))
+  if (purgedIds.length > 0) {
+    void deleteFileBlobs(purgedIds)
+    console.log(`Purged ${purgedIds.length} expired file(s)`)
   }
 }, 60_000)
 fileCleanupTimer.unref()

@@ -26,6 +26,27 @@ function safeFilePath(fileId: string): string | null {
   if (!SAFE_FILENAME_RE.test(fileId)) return null
   return path.join(UPLOAD_DIR, fileId)
 }
+
+/**
+ * Delete encrypted file blobs from disk by id. Best-effort: missing files (ENOENT) are ignored.
+ * Used by the periodic expired-file cleanup so disk does not accumulate orphaned blobs.
+ */
+export async function deleteFileBlobs(fileIds: string[]): Promise<void> {
+  await Promise.all(
+    fileIds.map(async fileId => {
+      const filePath = safeFilePath(fileId)
+      if (!filePath) return
+      try {
+        await fs.promises.unlink(filePath)
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          console.error('Failed to delete file blob:', fileId)
+        }
+      }
+    })
+  )
+}
+
 const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5 MB
 const MAX_FILES_PER_USER = 500
 const FILE_EXPIRY_DAYS = 30

@@ -36,7 +36,7 @@ const PanicModal = dynamic(
   () => import("@/components/modals").then((m) => ({ default: m.PanicModal })),
   { ssr: false },
 );
-import { useMessengerSync } from "@/hooks/useMessengerSync";
+import { useHydrated } from "@/hooks/useMessengerSync";
 import { useContactActions } from "@/hooks/useContactActions";
 import { usePanic } from "@/hooks/usePanic";
 import { groupsApi } from "@/lib/api";
@@ -51,7 +51,7 @@ import { useContactAvatars } from "@/hooks/useContactAvatars";
 export default function ChatsPage() {
   const router = useRouter();
 
-  const { hydrated } = useMessengerSync();
+  const hydrated = useHydrated();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const hasIdentityKeys = useAuthStore((s) => s.hasIdentityKeys);
   const contacts = useContactsStore((s) => s.contacts);

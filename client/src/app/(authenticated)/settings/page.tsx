@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation";
 import { Button, Modal, SettingsSkeleton } from "@/components/ui";
 import MessengerShell from "@/components/messenger/MessengerShell";
 import LeftRail from "@/components/messenger/LeftRail";
-import { useMessengerSync } from "@/hooks/useMessengerSync";
+import { useHydrated } from "@/hooks/useMessengerSync";
 import { usePanic } from "@/hooks/usePanic";
 import { useAuthStore } from "@/stores";
 import { loadSettings, saveSettings, type Settings } from "@/crypto/storage";
@@ -26,7 +26,7 @@ import DangerZoneSection from "./components/DangerZoneSection";
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { hydrated } = useMessengerSync();
+  const hydrated = useHydrated();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const { isPanicMode, showPanicConfirm, setShowPanicConfirm, executePanic } =
     usePanic();

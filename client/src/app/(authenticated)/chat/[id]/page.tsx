@@ -34,7 +34,7 @@ const PanicModal = dynamic(
   () => import("@/components/modals").then((m) => ({ default: m.PanicModal })),
   { ssr: false },
 );
-import { useMessengerSync } from "@/hooks/useMessengerSync";
+import { useHydrated } from "@/hooks/useMessengerSync";
 import { useContactActions } from "@/hooks/useContactActions";
 import { usePanic } from "@/hooks/usePanic";
 import {
@@ -83,7 +83,7 @@ interface ChatPageProps {
 export default function ChatPage({ params }: ChatPageProps) {
   const { id: chatId } = use(params);
   const router = useRouter();
-  const { hydrated } = useMessengerSync();
+  const hydrated = useHydrated();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);

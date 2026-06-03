@@ -360,7 +360,7 @@ const getFileById = db.prepare(`
 `)
 
 const deleteExpiredFiles = db.prepare(`
-  DELETE FROM files WHERE expires_at IS NOT NULL AND expires_at < ?
+  DELETE FROM files WHERE expires_at IS NOT NULL AND expires_at < ? RETURNING id
 `)
 
 const countUserFiles = db.prepare(`
@@ -730,9 +730,9 @@ export const database = {
     return result.count
   },
 
-  purgeExpiredFiles(nowSec: number): number {
-    const result = deleteExpiredFiles.run(nowSec)
-    return result.changes
+  purgeExpiredFiles(nowSec: number): string[] {
+    const rows = deleteExpiredFiles.all(nowSec) as Array<{ id: string }>
+    return rows.map(row => row.id)
   },
 
   // ── Invite Tokens ──
