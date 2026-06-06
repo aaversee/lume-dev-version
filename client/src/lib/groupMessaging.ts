@@ -58,6 +58,7 @@ export async function sendGroupMessage(params: {
   for (const member of recipients) {
     try {
       const existing = vaultGetSession(member.user_id);
+      const hadExistingSession = Boolean(existing);
       let session = existing ? deserializeSession(existing) : null;
       let x3dhInit: X3DHInitPayload | undefined;
 
@@ -100,6 +101,9 @@ export async function sendGroupMessage(params: {
           recipientOneTimePreKey: bundle.oneTimePrekey ?? null,
         };
       }
+      if (!session) {
+        throw new Error("Failed to initialize ratchet session");
+      }
 
       const encrypted = ratchetEncrypt(session, plaintextBytes);
       const encryptedPayload = encodeRatchetEnvelope({
@@ -108,10 +112,6 @@ export async function sendGroupMessage(params: {
         ...(x3dhInit ? { x3dh: x3dhInit } : {}),
       });
 
-      useSessionsStore
-        .getState()
-        .upsertSession(member.user_id, serializeSession(session));
-
       const { error: sendError } = await messagesApi.send({
         senderId,
         recipientUsername: member.username,
@@ -119,8 +119,21 @@ export async function sendGroupMessage(params: {
       });
 
       if (sendError) {
+        // For an already-established session, keep the advanced state to avoid
+        // potential key reuse on ambiguous transport failures.
+        // For first-contact X3DH, do not persist on explicit send failure:
+        // otherwise retries omit X3DH and become undecryptable for recipients
+        // who never received the initial handshake message.
+        if (hadExistingSession) {
+          useSessionsStore
+            .getState()
+            .upsertSession(member.user_id, serializeSession(session));
+        }
         failed++;
       } else {
+        useSessionsStore
+          .getState()
+          .upsertSession(member.user_id, serializeSession(session));
         sent++;
       }
     } catch {
