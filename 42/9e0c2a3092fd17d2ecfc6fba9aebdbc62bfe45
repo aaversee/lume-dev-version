@@ -1,0 +1,27 @@
+.github/workflows/ci.yml
+  s_5a7e53f7a98baa::t_d8cb9abf9885c3 25,43,59,76,92,109,127
+server/package-lock.json
+  ai_agent 23,5525-5531
+client/package-lock.json
+  ai_agent 22,8185-8191
+server/package.json
+  s_5a7e53f7a98baa::t_fef75441045081 31
+client/package.json
+  s_5a7e53f7a98baa::t_fef75441045081 27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "429e0c2a3092fd17d2ecfc6fba9aebdbc62bfe45",
+  "prompts": {},
+  "sessions": {
+    "s_5a7e53f7a98baa": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0bf07eb7-0f49-41f5-8889-d9e9e0db810d",
+        "model": "composer-2.5"
+      },
+      "human_author": "rekonov <rekonov@users.noreply.github.com>"
+    }
+  }
+}
