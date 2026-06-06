@@ -1,0 +1,27 @@
+client/package-lock.json
+  ai_agent 22,8185-8191
+server/package-lock.json
+  ai_agent 23,5525-5531
+server/package.json
+  s_5a7e53f7a98baa::t_7a63dcca854bbd 31
+.github/workflows/ci.yml
+  s_5a7e53f7a98baa::t_ef1d8732e76408 25,43,59,76,92,109,127
+client/package.json
+  s_5a7e53f7a98baa::t_3ab695f34ab18e 27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "445d7b2ef35d0a5eaa334d2a25615f037a879c75",
+  "prompts": {},
+  "sessions": {
+    "s_5a7e53f7a98baa": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0bf07eb7-0f49-41f5-8889-d9e9e0db810d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "rekonov <rekonov@users.noreply.github.com>"
+    }
+  }
+}
