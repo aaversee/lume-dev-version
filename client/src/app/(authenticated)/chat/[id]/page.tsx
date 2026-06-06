@@ -499,10 +499,6 @@ export default function ChatPage({ params }: ChatPageProps) {
         ...(x3dhInit ? { x3dh: x3dhInit } : {}),
       });
 
-      if (contactId) {
-        upsertSession(contactId, serializeSession(session));
-      }
-
       const { data, error } = await messagesApi.send({
         senderId: userId,
         recipientUsername: contact.username,
@@ -510,8 +506,19 @@ export default function ChatPage({ params }: ChatPageProps) {
       });
 
       if (error) {
+        // Same desync guard as group fan-out (lib/groupMessaging.ts): never
+        // persist a fresh X3DH session on a failed first send — a retry must
+        // re-send the handshake, otherwise the recipient can never decrypt.
+        // For an already-established session, keep the advance to avoid reusing
+        // a message key on an ambiguous transport failure.
+        if (contactId && existing) {
+          upsertSession(contactId, serializeSession(session));
+        }
         updateMessage(chatId, messageId, { status: "failed" });
       } else {
+        if (contactId) {
+          upsertSession(contactId, serializeSession(session));
+        }
         clearCryptoBanner();
         updateMessage(chatId, messageId, {
           status: data?.delivered ? "delivered" : "sent",
