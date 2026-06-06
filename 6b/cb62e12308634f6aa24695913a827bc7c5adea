@@ -1,0 +1,22 @@
+server/test/chat.e2e.test.ts
+  s_5a7e53f7a98baa::t_4c0adca3a18cee 79,119,146,171,181,193,203,214,237,256
+  s_5a7e53f7a98baa::t_f2986dd8c0035f 80,120,147,182,215,227,238,257
+  s_5a7e53f7a98baa::t_1933129b199c2b 239
+  s_5a7e53f7a98baa::t_c2cdc1917763a1 38-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "6bcb62e12308634f6aa24695913a827bc7c5adea",
+  "prompts": {},
+  "sessions": {
+    "s_5a7e53f7a98baa": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0bf07eb7-0f49-41f5-8889-d9e9e0db810d",
+        "model": "composer-2.5"
+      },
+      "human_author": "rekonov <rekonov@users.noreply.github.com>"
+    }
+  }
+}
