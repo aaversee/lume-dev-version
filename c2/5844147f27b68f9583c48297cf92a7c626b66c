@@ -1,0 +1,33 @@
+.github/dependabot.yml
+  s_5a7e53f7a98baa::t_b71c1363ec95b7 5
+  s_5a7e53f7a98baa::t_24f208061df731 16
+  s_5a7e53f7a98baa::t_8c2c8868051d7c 27
+client/package-lock.json
+  ai_agent 14,16,18-19,27,1393-1395,1403-1405,1419-1421,1435-1437,1451-1453,1467-1469,1483-1485,1499-1501,1515-1517,1531-1533,5199-5201,6404-6406,6409,6423-6430,6985-6987,6994-6996,7002
+.github/workflows/ci.yml
+  s_5a7e53f7a98baa::t_06be2c347d3a55 129
+  s_5a7e53f7a98baa::t_0441cae77ca464 128
+  s_5a7e53f7a98baa::t_83906b7dc86d72 26,44,60,77,93,110
+client/package.json
+  s_5a7e53f7a98baa::t_6b012115d4b51e 19,21,23-24,32
+server/package-lock.json
+  ai_agent 13,25,35,40,1311-1313,1388-1390,1394-1397,1413-1415,1419-1420,1431-1433,1437,1462-1464,1468-1469,1516-1518,1639-1641,1653-1655,1659-1662,1681-1683,1687,2207-2209,2217,5791-5793
+server/package.json
+  s_5a7e53f7a98baa::t_8f96dd47a17fbf 21,33,43,48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "c25844147f27b68f9583c48297cf92a7c626b66c",
+  "prompts": {},
+  "sessions": {
+    "s_5a7e53f7a98baa": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0bf07eb7-0f49-41f5-8889-d9e9e0db810d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "rekonov <rekonov@users.noreply.github.com>"
+    }
+  }
+}
