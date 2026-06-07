@@ -1,0 +1,24 @@
+client/src/hooks/useMessengerSync.ts
+  s_5a7e53f7a98baa::t_df69a03a5a4977 428,432
+  s_5a7e53f7a98baa::t_2caff2372b9806 461-466,479-480,482,503-511,518
+  s_5a7e53f7a98baa::t_3286ed1833abb1 513-517
+  s_5a7e53f7a98baa::t_49c44bd6ba0219 266-271,274
+  s_5a7e53f7a98baa::t_1ef6d4b5c248b4 272-273
+  s_5a7e53f7a98baa::t_a0fe9a6abab92e 427,429-431,433-434,436-443,445
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "cd3bc8265e8e034ef54e6a5584e0e5c8fdec3763",
+  "prompts": {},
+  "sessions": {
+    "s_5a7e53f7a98baa": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0bf07eb7-0f49-41f5-8889-d9e9e0db810d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "rekonov <rekonov@users.noreply.github.com>"
+    }
+  }
+}
