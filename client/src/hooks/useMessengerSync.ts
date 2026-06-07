@@ -254,14 +254,6 @@ async function appendIncomingMessage(params: {
 
   const ratchetEnvelope = parseRatchetEnvelope(encryptedPayload);
 
-  const contactForMessage = await ensureContact({
-    senderId,
-    senderUsername,
-    encryptedPayload,
-    masterKey,
-  });
-  if (!contactForMessage) return false;
-
   let content = "[Unable to decrypt message]";
   let timestamp = fallbackTimestamp;
   let selfDestructSeconds: number | null | undefined = null;
@@ -270,6 +262,16 @@ async function appendIncomingMessage(params: {
     | undefined;
   let attachment: MessageAttachment | undefined;
   let groupId: string | undefined;
+
+  // Resolved lazily: a 1:1 message needs a stored contact for display, but a
+  // group message must NOT create one (the ratchet decrypt already authenticates
+  // the sender, and membership is known from the group roster).
+  let resolvedContact: Contact | null = null;
+  // The advanced ratchet session is committed only once routing is known, so a
+  // failed 1:1 contact lookup leaves the stored session intact (message retried,
+  // no desync). Held separately so it can be zeroed if the message is discarded.
+  let advancedSession: DoubleRatchetSession | null = null;
+  let commitRatchetSession: (() => void) | null = null;
 
   if (ratchetEnvelope) {
     // v2: X3DH + Double Ratchet (lume-ratchet)
@@ -422,14 +424,25 @@ async function appendIncomingMessage(params: {
       selfDestructSeconds = ratchetEnvelope.selfDestruct ?? null;
     }
 
-    useSessionsStore
-      .getState()
-      .upsertSession(senderId, serializeSession(session));
-    useUIStore.getState().clearCryptoBanner();
+    // Defer committing the advanced session until routing is known.
+    advancedSession = session;
+    commitRatchetSession = () => {
+      useSessionsStore
+        .getState()
+        .upsertSession(senderId, serializeSession(session));
+      useUIStore.getState().clearCryptoBanner();
+    };
   } else {
-    // v1: nacl.box (legacy)
+    // v1: nacl.box (legacy, always 1:1). Resolve the contact for its exchange
+    // key, falling back to the key embedded in the payload.
+    resolvedContact = await ensureContact({
+      senderId,
+      senderUsername,
+      encryptedPayload,
+      masterKey,
+    });
     const senderExchangeKey =
-      contactForMessage.exchangeKey ||
+      resolvedContact?.exchangeKey ||
       getSenderExchangeKeyFromPayload(encryptedPayload) ||
       undefined;
 
@@ -445,9 +458,12 @@ async function appendIncomingMessage(params: {
     selfDestructSeconds = decoded?.selfDestruct ?? null;
   }
 
-  // Blocked contacts: ratchet was advanced above to stay in sync,
-  // but we silently discard the message (no chat entry, no notification).
-  if (isBlockedSender) return true;
+  // Blocked contacts: commit the advanced ratchet (stay in sync), then silently
+  // discard the message (no chat entry, no notification, no contact created).
+  if (isBlockedSender) {
+    commitRatchetSession?.();
+    return true;
+  }
 
   const msgType = attachment
     ? attachment.mimeType.startsWith("image/")
@@ -460,8 +476,10 @@ async function appendIncomingMessage(params: {
     : undefined;
 
   // Group message: routed by groupId carried inside the encrypted payload.
-  // The sender is authenticated by the 1:1 ratchet session used to decrypt it.
+  // The sender is authenticated by the 1:1 ratchet session used to decrypt it,
+  // so we commit the session but never create a contact for the sender.
   if (groupId) {
+    commitRatchetSession?.();
     const { activeGroupId, addGroupMessage } = useGroupsStore.getState();
     addGroupMessage(
       groupId,
@@ -481,6 +499,23 @@ async function appendIncomingMessage(params: {
     );
     return true;
   }
+
+  // 1:1 message: resolve the contact before committing the ratchet, so a failed
+  // lookup leaves the stored session untouched and the message can be retried.
+  if (!resolvedContact) {
+    resolvedContact = await ensureContact({
+      senderId,
+      senderUsername,
+      encryptedPayload,
+      masterKey,
+    });
+  }
+  if (!resolvedContact) {
+    // Discard the advanced (uncommitted) ratchet; the message will be retried.
+    if (advancedSession) zeroSessionKeys(advancedSession);
+    return false;
+  }
+  commitRatchetSession?.();
 
   const allChats = useChatsStore.getState().chats;
   let targetChat = allChats.find((c) => c.contactId === senderId);
@@ -967,7 +1002,27 @@ export function useMessengerSync() {
       const data = rawData as {
         senderId: string;
         messageIds: string[];
+        groupId?: string;
       };
+
+      // Group read receipt: aggregate per-message reads; a message flips to
+      // "read" once every recipient has acknowledged it.
+      if (data.groupId) {
+        const group = useGroupsStore
+          .getState()
+          .groups.find((g) => g.id === data.groupId);
+        if (!group) return;
+        const recipientCount = Math.max(group.members.length - 1, 0);
+        useGroupsStore
+          .getState()
+          .recordGroupReads(
+            data.groupId,
+            data.messageIds,
+            data.senderId,
+            recipientCount,
+          );
+        return;
+      }
 
       const chats = useChatsStore.getState().chats;
 

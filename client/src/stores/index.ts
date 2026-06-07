@@ -435,13 +435,21 @@ export const useUIStore = create<UIState>()((set) => ({
 interface TypingState {
   /** contactId -> true if currently typing */
   typingUsers: Record<string, boolean>;
+  /** groupId -> { senderId -> true } for members typing in a group */
+  groupTypingUsers: Record<string, Record<string, boolean>>;
 
   setTyping: (contactId: string, isTyping: boolean) => void;
+  setGroupTyping: (
+    groupId: string,
+    senderId: string,
+    isTyping: boolean,
+  ) => void;
   clearAll: () => void;
 }
 
 export const useTypingStore = create<TypingState>()((set) => ({
   typingUsers: {},
+  groupTypingUsers: {},
 
   setTyping: (contactId, isTyping) =>
     set((state) => {
@@ -454,7 +462,29 @@ export const useTypingStore = create<TypingState>()((set) => ({
       return { typingUsers: next };
     }),
 
-  clearAll: () => set({ typingUsers: {} }),
+  setGroupTyping: (groupId, senderId, isTyping) =>
+    set((state) => {
+      const current = state.groupTypingUsers[groupId] ?? {};
+      if (isTyping) {
+        return {
+          groupTypingUsers: {
+            ...state.groupTypingUsers,
+            [groupId]: { ...current, [senderId]: true },
+          },
+        };
+      }
+      if (!(senderId in current)) return state;
+      const nextGroup = { ...current };
+      delete nextGroup[senderId];
+      return {
+        groupTypingUsers: {
+          ...state.groupTypingUsers,
+          [groupId]: nextGroup,
+        },
+      };
+    }),
+
+  clearAll: () => set({ typingUsers: {}, groupTypingUsers: {} }),
 }));
 
 // ==================== Blocked Store ====================

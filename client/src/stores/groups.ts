@@ -17,6 +17,8 @@ interface GroupsState {
   activeGroupId: string | null;
   messagesByGroup: Record<string, Message[]>;
   unreadByGroup: Record<string, number>;
+  /** groupId -> messageId -> userIds who have read it (for outgoing messages) */
+  readsByGroup: Record<string, Record<string, string[]>>;
 
   setGroups: (groups: GroupData[]) => void;
   addGroup: (group: GroupData) => void;
@@ -37,6 +39,12 @@ interface GroupsState {
   ) => void;
   deleteGroupMessage: (groupId: string, messageId: string) => void;
   markGroupRead: (groupId: string) => void;
+  recordGroupReads: (
+    groupId: string,
+    messageIds: string[],
+    readerId: string,
+    recipientCount: number,
+  ) => void;
 }
 
 export const useGroupsStore = create<GroupsState>()((set) => ({
@@ -44,6 +52,7 @@ export const useGroupsStore = create<GroupsState>()((set) => ({
   activeGroupId: null,
   messagesByGroup: {},
   unreadByGroup: {},
+  readsByGroup: {},
 
   setGroups: (groups) => set({ groups }),
 
@@ -60,11 +69,14 @@ export const useGroupsStore = create<GroupsState>()((set) => ({
       delete nextMessages[id];
       const nextUnread = { ...state.unreadByGroup };
       delete nextUnread[id];
+      const nextReads = { ...state.readsByGroup };
+      delete nextReads[id];
       return {
         groups: state.groups.filter((g) => g.id !== id),
         activeGroupId: state.activeGroupId === id ? null : state.activeGroupId,
         messagesByGroup: nextMessages,
         unreadByGroup: nextUnread,
+        readsByGroup: nextReads,
       };
     }),
 
@@ -126,5 +138,47 @@ export const useGroupsStore = create<GroupsState>()((set) => ({
     set((state) => {
       if (!state.unreadByGroup[groupId]) return state;
       return { unreadByGroup: { ...state.unreadByGroup, [groupId]: 0 } };
+    }),
+
+  recordGroupReads: (groupId, messageIds, readerId, recipientCount) =>
+    set((state) => {
+      const groupReads = state.readsByGroup[groupId] ?? {};
+      const nextReads = { ...groupReads };
+      const messages = state.messagesByGroup[groupId];
+      const nextMessages = messages ? [...messages] : null;
+      let messagesChanged = false;
+
+      for (const messageId of messageIds) {
+        const readers = nextReads[messageId] ?? [];
+        if (!readers.includes(readerId)) {
+          nextReads[messageId] = [...readers, readerId];
+        }
+
+        // Mark the message read once every recipient has acknowledged it.
+        if (
+          recipientCount > 0 &&
+          (nextReads[messageId]?.length ?? 0) >= recipientCount &&
+          nextMessages
+        ) {
+          const idx = nextMessages.findIndex((m) => m.id === messageId);
+          const target = idx !== -1 ? nextMessages[idx] : undefined;
+          if (target && target.status !== "read") {
+            nextMessages[idx] = { ...target, status: "read" };
+            messagesChanged = true;
+          }
+        }
+      }
+
+      return {
+        readsByGroup: { ...state.readsByGroup, [groupId]: nextReads },
+        ...(messagesChanged && nextMessages
+          ? {
+              messagesByGroup: {
+                ...state.messagesByGroup,
+                [groupId]: nextMessages,
+              },
+            }
+          : {}),
+      };
     }),
 }));
