@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
 import { MessageBubbleMemo } from "./MessageBubble";
+import { TIMER_OPTIONS, formatTimerLabel } from "./chatUtils";
 import { vaultHasKeys } from "@/crypto/keyVault";
 import { sendGroupMessage } from "@/lib/groupMessaging";
 import {
@@ -50,6 +51,8 @@ export default function GroupView({ group }: GroupViewProps) {
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [pendingAttachment, setPendingAttachment] =
     useState<PendingAttachment | null>(null);
+  const [selfDestructTime, setSelfDestructTime] = useState<number | null>(null);
+  const [showOptions, setShowOptions] = useState(false);
 
   const [showAddMember, setShowAddMember] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -186,6 +189,9 @@ export default function GroupView({ group }: GroupViewProps) {
       type: msgType,
       timestamp,
       status: "sending",
+      selfDestructAt: selfDestructTime
+        ? timestamp + selfDestructTime * 1000
+        : undefined,
       replyTo: replyRef,
       attachment: attachmentMeta,
     });
@@ -202,6 +208,7 @@ export default function GroupView({ group }: GroupViewProps) {
         timestamp,
         replyTo: replyRef,
         attachment: attachmentMeta,
+        selfDestructSeconds: selfDestructTime,
       });
       updateGroupMessage(group.id, messageId, {
         status: result.sent > 0 ? "sent" : "failed",
@@ -422,6 +429,32 @@ export default function GroupView({ group }: GroupViewProps) {
                 </button>
               </div>
             )}
+            {showOptions && (
+              <div className="mb-3 px-1">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                  Auto-delete
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {TIMER_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.label}
+                      type="button"
+                      onClick={() => {
+                        setSelfDestructTime(opt.value);
+                        setShowOptions(false);
+                      }}
+                      className={`px-3 py-1.5 rounded-full border text-[12px] transition-colors ${
+                        selfDestructTime === opt.value
+                          ? "bg-[var(--accent)]/15 border-[var(--accent)]/40 text-[var(--accent)]"
+                          : "bg-[var(--surface-strong)] border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex items-end gap-3">
               <div className="flex-1">
                 <textarea
@@ -459,6 +492,27 @@ export default function GroupView({ group }: GroupViewProps) {
               </button>
               <button
                 type="button"
+                onClick={() => setShowOptions((v) => !v)}
+                disabled={!hasMembersToSend}
+                className={`w-12 h-12 rounded-full border transition-colors inline-flex items-center justify-center flex-shrink-0 disabled:opacity-60 disabled:cursor-not-allowed ${
+                  selfDestructTime
+                    ? "bg-[var(--accent)]/15 border-[var(--accent)]/40 text-[var(--accent)]"
+                    : "bg-[var(--surface-strong)] border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                }`}
+                aria-label="Self-destruct timer"
+                title={
+                  selfDestructTime
+                    ? `Auto-delete: ${formatTimerLabel(selfDestructTime)}`
+                    : "Self-destruct timer"
+                }
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v5l3 2" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </button>
+              <button
+                type="button"
                 onClick={() => void handleSend()}
                 disabled={
                   (!messageText.trim() && !pendingAttachment) ||
@@ -478,6 +532,13 @@ export default function GroupView({ group }: GroupViewProps) {
                 )}
               </button>
             </div>
+            {selfDestructTime ? (
+              <div className="mt-2 text-center">
+                <span className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                  Auto-delete in {formatTimerLabel(selfDestructTime)}
+                </span>
+              </div>
+            ) : null}
           </footer>
         </>
       ) : (

@@ -44,8 +44,17 @@ export async function sendGroupMessage(params: {
   timestamp: number;
   replyTo?: MessageReplyRef;
   attachment?: MessageAttachment;
+  selfDestructSeconds?: number | null;
 }): Promise<GroupSendResult> {
-  const { group, senderId, content, timestamp, replyTo, attachment } = params;
+  const {
+    group,
+    senderId,
+    content,
+    timestamp,
+    replyTo,
+    attachment,
+    selfDestructSeconds,
+  } = params;
 
   const recipients = group.members.filter((m) => m.user_id !== senderId);
 
@@ -53,6 +62,7 @@ export async function sendGroupMessage(params: {
     content,
     timestamp,
     groupId: group.id,
+    selfDestruct: selfDestructSeconds ?? null,
     ...(replyTo ? { replyTo } : {}),
     ...(attachment ? { attachment } : {}),
   });
