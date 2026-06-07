@@ -35,7 +35,8 @@ function signHeaders(method: string, path: string, body: unknown, keyPair: nacl.
   };
 }
 
-function makeUser(username: string) {
+function makeUser(prefix: string) {
+  const username = `${prefix}_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`;
   const idKey = nacl.sign.keyPair();
   const spk = nacl.sign.keyPair();
   const signedPrekeySig = nacl.sign.detached(spk.publicKey, idKey.secretKey);
@@ -75,8 +76,8 @@ describe('E2E chat flow', () => {
   }
 
   it('send → pending → single ack: full round trip', async () => {
-    const alice = makeUser('alice_' + crypto.randomUUID().slice(0, 4));
-    const bob = makeUser('bob_' + crypto.randomUUID().slice(0, 4));
+    const alice = makeUser('alice');
+    const bob = makeUser('bob');
     const aliceId = await register(alice);
     const bobId = await register(bob);
 
@@ -115,8 +116,8 @@ describe('E2E chat flow', () => {
   });
 
   it('batch acknowledge removes multiple messages', async () => {
-    const alice = makeUser('alice_' + crypto.randomUUID().slice(0, 4));
-    const bob = makeUser('bob_' + crypto.randomUUID().slice(0, 4));
+    const alice = makeUser('alice');
+    const bob = makeUser('bob');
     const aliceId = await register(alice);
     const bobId = await register(bob);
 
@@ -142,8 +143,8 @@ describe('E2E chat flow', () => {
   });
 
   it('blocked sender message is silently accepted but not stored', async () => {
-    const alice = makeUser('alice_' + crypto.randomUUID().slice(0, 4));
-    const bob = makeUser('bob_' + crypto.randomUUID().slice(0, 4));
+    const alice = makeUser('alice');
+    const bob = makeUser('bob');
     const aliceId = await register(alice);
     const bobId = await register(bob);
 
@@ -167,7 +168,7 @@ describe('E2E chat flow', () => {
   // === Error cases ===
 
   it('send to non-existent recipient returns 404', async () => {
-    const alice = makeUser('alice_' + crypto.randomUUID().slice(0, 4));
+    const alice = makeUser('alice');
     const aliceId = await register(alice);
 
     const body = { senderId: aliceId, recipientUsername: 'ghost_user', encryptedPayload: makePayload() };
@@ -177,8 +178,8 @@ describe('E2E chat flow', () => {
   });
 
   it('empty encrypted payload returns 400', async () => {
-    const alice = makeUser('alice_' + crypto.randomUUID().slice(0, 4));
-    const bob = makeUser('bob_' + crypto.randomUUID().slice(0, 4));
+    const alice = makeUser('alice');
+    const bob = makeUser('bob');
     const aliceId = await register(alice);
     await register(bob);
 
@@ -189,7 +190,7 @@ describe('E2E chat flow', () => {
   });
 
   it('invalid senderId format returns 400', async () => {
-    const alice = makeUser('alice_' + crypto.randomUUID().slice(0, 4));
+    const alice = makeUser('alice');
     await register(alice);
 
     const body = { senderId: 'bad-id', recipientUsername: 'someone', encryptedPayload: makePayload() };
@@ -199,7 +200,7 @@ describe('E2E chat flow', () => {
   });
 
   it('non-existent senderId returns 401', async () => {
-    const alice = makeUser('alice_' + crypto.randomUUID().slice(0, 4));
+    const alice = makeUser('alice');
     await register(alice);
 
     const fakeId = '00000000-0000-4000-8000-000000000099';
@@ -210,8 +211,8 @@ describe('E2E chat flow', () => {
   });
 
   it('identity key mismatch returns 403', async () => {
-    const alice = makeUser('alice_' + crypto.randomUUID().slice(0, 4));
-    const bob = makeUser('bob_' + crypto.randomUUID().slice(0, 4));
+    const alice = makeUser('alice');
+    const bob = makeUser('bob');
     const aliceId = await register(alice);
     await register(bob);
 
@@ -223,7 +224,7 @@ describe('E2E chat flow', () => {
   });
 
   it('acknowledge non-existent message returns 404', async () => {
-    const bob = makeUser('bob_' + crypto.randomUUID().slice(0, 4));
+    const bob = makeUser('bob');
     await register(bob);
 
     const fakeId = '00000000-0000-4000-8000-000000000077';
@@ -233,9 +234,9 @@ describe('E2E chat flow', () => {
   });
 
   it("acknowledge another user's message returns 403", async () => {
-    const alice = makeUser('alice_' + crypto.randomUUID().slice(0, 4));
-    const bob = makeUser('bob_' + crypto.randomUUID().slice(0, 4));
-    const eve = makeUser('eve_' + crypto.randomUUID().slice(0, 4));
+    const alice = makeUser('alice');
+    const bob = makeUser('bob');
+    const eve = makeUser('eve');
     const aliceId = await register(alice);
     await register(bob);
     await register(eve);
@@ -252,8 +253,8 @@ describe('E2E chat flow', () => {
   });
 
   it("fetch another user's pending messages returns 403", async () => {
-    const alice = makeUser('alice_' + crypto.randomUUID().slice(0, 4));
-    const bob = makeUser('bob_' + crypto.randomUUID().slice(0, 4));
+    const alice = makeUser('alice');
+    const bob = makeUser('bob');
     await register(alice);
     const bobId = await register(bob);
 
