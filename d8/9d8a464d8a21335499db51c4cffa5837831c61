@@ -1,0 +1,27 @@
+client/src/components/chat/GroupView.tsx
+  s_5a7e53f7a98baa::t_b8d2aba544290b 5,7-12,18-24,27-30
+  s_5a7e53f7a98baa::t_698ad2d8f0b170 123-130,143-179,186,190,194-195,204
+  s_5a7e53f7a98baa::t_cf0ce7556871b9 362-398
+  s_5a7e53f7a98baa::t_996d641046f5e3 440-459,463-467
+  s_5a7e53f7a98baa::t_ef98afe0e98f27 51-52
+  s_5a7e53f7a98baa::t_520b3d52f3d706 60
+  s_5a7e53f7a98baa::t_c8ed1318e883d0 94-120
+client/src/lib/groupMessaging.ts
+  s_5a7e53f7a98baa::t_bcd95258ff0ed2 29-33,46,48,57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "d89d8a464d8a21335499db51c4cffa5837831c61",
+  "prompts": {},
+  "sessions": {
+    "s_5a7e53f7a98baa": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0bf07eb7-0f49-41f5-8889-d9e9e0db810d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "rekonov <rekonov@users.noreply.github.com>"
+    }
+  }
+}
