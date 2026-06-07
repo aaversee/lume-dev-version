@@ -2,15 +2,32 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { groupsApi } from "@/lib/api";
+import { groupsApi, filesApi } from "@/lib/api";
 import type { GroupData } from "@/lib/api";
-import { useAuthStore, useGroupsStore, type Message } from "@/stores";
+import {
+  useAuthStore,
+  useGroupsStore,
+  type Message,
+  type MessageAttachment,
+} from "@/stores";
 import { Button } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
 import { MessageBubbleMemo } from "./MessageBubble";
 import { vaultHasKeys } from "@/crypto/keyVault";
 import { sendGroupMessage } from "@/lib/groupMessaging";
+import {
+  encryptFile,
+  readFileAsUint8Array,
+  isImageMime,
+  formatFileSize,
+  MAX_FILE_SIZE,
+} from "@/lib/fileEncryption";
 import AddMemberModal from "@/components/modals/AddMemberModal";
+
+interface PendingAttachment {
+  file: File;
+  preview?: string;
+}
 
 interface GroupViewProps {
   group: GroupData;
@@ -31,6 +48,8 @@ export default function GroupView({ group }: GroupViewProps) {
   const [messageText, setMessageText] = useState("");
   const [sending, setSending] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [pendingAttachment, setPendingAttachment] =
+    useState<PendingAttachment | null>(null);
 
   const [showAddMember, setShowAddMember] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -38,6 +57,7 @@ export default function GroupView({ group }: GroupViewProps) {
   const [error, setError] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentMember = group.members.find((m) => m.user_id === userId);
   const isAdmin = currentMember?.role === "admin";
@@ -71,9 +91,43 @@ export default function GroupView({ group }: GroupViewProps) {
     setReplyingTo(message);
   }, []);
 
+  const handleAttach = useCallback((file: File) => {
+    if (file.size > MAX_FILE_SIZE) {
+      alert(`File too large. Max size: ${formatFileSize(MAX_FILE_SIZE)}`);
+      return;
+    }
+    const preview = file.type.startsWith("image/")
+      ? URL.createObjectURL(file)
+      : undefined;
+    setPendingAttachment((prev) => {
+      if (prev?.preview) URL.revokeObjectURL(prev.preview);
+      return { file, preview };
+    });
+  }, []);
+
+  const handleCancelAttachment = useCallback(() => {
+    setPendingAttachment((prev) => {
+      if (prev?.preview) URL.revokeObjectURL(prev.preview);
+      return null;
+    });
+  }, []);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleAttach(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const handleSend = async () => {
     const text = messageText.trim();
-    if (!text || !userId || !hasMembersToSend || !vaultHasKeys()) return;
+    const hasAttachment = !!pendingAttachment;
+    if (
+      (!text && !hasAttachment) ||
+      !userId ||
+      !hasMembersToSend ||
+      !vaultHasKeys()
+    )
+      return;
 
     setSending(true);
     const messageId = uuidv4();
@@ -86,19 +140,59 @@ export default function GroupView({ group }: GroupViewProps) {
         }
       : undefined;
 
+    // Encrypt and upload the attachment once; the symmetric key travels to each
+    // member inside their own ratchet-encrypted payload, so the server only ever
+    // stores a single opaque blob.
+    let attachmentMeta: MessageAttachment | undefined;
+    if (pendingAttachment) {
+      try {
+        const fileData = await readFileAsUint8Array(pendingAttachment.file);
+        const encrypted = await encryptFile(
+          fileData,
+          pendingAttachment.file.type,
+          pendingAttachment.file.name,
+        );
+        const { data: uploadResult, error: uploadError } =
+          await filesApi.upload(encrypted.ciphertext, encrypted.mimeType);
+        if (uploadError || !uploadResult) {
+          throw new Error(uploadError || "File upload failed");
+        }
+        attachmentMeta = {
+          fileId: uploadResult.fileId,
+          fileName: encrypted.fileName,
+          mimeType: encrypted.mimeType,
+          size: encrypted.originalSize,
+          key: encrypted.key,
+          nonce: encrypted.nonce,
+        };
+      } catch {
+        setSending(false);
+        return;
+      }
+    }
+
+    const msgType = attachmentMeta
+      ? isImageMime(attachmentMeta.mimeType)
+        ? "image"
+        : "file"
+      : "text";
+
     // Optimistic local echo
     addGroupMessage(group.id, {
       id: messageId,
       chatId: group.id,
       senderId: userId,
       content: text,
-      type: "text",
+      type: msgType,
       timestamp,
       status: "sending",
       replyTo: replyRef,
+      attachment: attachmentMeta,
     });
     setMessageText("");
     setReplyingTo(null);
+    if (pendingAttachment?.preview) URL.revokeObjectURL(pendingAttachment.preview);
+    setPendingAttachment(null);
 
     try {
       const result = await sendGroupMessage({
@@ -107,6 +201,7 @@ export default function GroupView({ group }: GroupViewProps) {
         content: text,
         timestamp,
         replyTo: replyRef,
+        attachment: attachmentMeta,
       });
       updateGroupMessage(group.id, messageId, {
         status: result.sent > 0 ? "sent" : "failed",
@@ -264,6 +359,43 @@ export default function GroupView({ group }: GroupViewProps) {
 
           {/* Input */}
           <footer className="px-3 sm:px-5 md:px-6 py-3 sm:py-4 border-t border-[var(--border)]/70">
+            {pendingAttachment && (
+              <div className="mb-3 flex items-center gap-3 px-4 py-2.5 rounded-[var(--radius-md)] bg-[var(--surface-alt)] border border-[var(--border)]">
+                {pendingAttachment.preview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={pendingAttachment.preview}
+                    alt="Attachment preview"
+                    className="w-12 h-12 rounded object-cover"
+                  />
+                ) : (
+                  <div className="w-12 h-12 rounded bg-[var(--surface-strong)] flex items-center justify-center">
+                    <svg className="w-6 h-6 text-[var(--text-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M14 2v6h6" />
+                    </svg>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-semibold text-[var(--text-primary)] truncate">
+                    {pendingAttachment.file.name}
+                  </p>
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    {formatFileSize(pendingAttachment.file.size)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCancelAttachment}
+                  className="flex-shrink-0 p-1 rounded-full hover:bg-[var(--surface-strong)] transition-colors"
+                  aria-label="Remove attachment"
+                >
+                  <svg className="w-4 h-4 text-[var(--text-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
             {replyingTo && (
               <div className="mb-3 flex items-start gap-3 px-4 py-2.5 rounded-[var(--radius-md)] bg-[var(--surface-alt)] border border-[var(--border)]">
                 <div className="flex-1 min-w-0 pl-3 border-l-2 border-[var(--accent)]">
@@ -305,10 +437,34 @@ export default function GroupView({ group }: GroupViewProps) {
                   style={{ minHeight: "48px", maxHeight: "140px" }}
                 />
               </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={handleFileSelect}
+                accept="image/*,.pdf,.doc,.docx,.txt,.zip"
+                className="hidden"
+                aria-hidden="true"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!hasMembersToSend}
+                className="w-12 h-12 rounded-full bg-[var(--surface-strong)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center flex-shrink-0"
+                aria-label="Attach file"
+                title="Attach file"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+                </svg>
+              </button>
               <button
                 type="button"
                 onClick={() => void handleSend()}
-                disabled={!messageText.trim() || sending || !hasMembersToSend}
+                disabled={
+                  (!messageText.trim() && !pendingAttachment) ||
+                  sending ||
+                  !hasMembersToSend
+                }
                 className="w-12 h-12 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] border border-[var(--border)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center flex-shrink-0 shadow-[var(--shadow-sm)]"
                 aria-label="Send"
                 title="Send"

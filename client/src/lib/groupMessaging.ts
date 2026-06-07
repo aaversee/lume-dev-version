@@ -26,7 +26,11 @@ import {
 } from "@/crypto/keyVault";
 import { verify } from "@/crypto/keys";
 import { decodeBase64 } from "tweetnacl-util";
-import { useSessionsStore, type MessageReplyRef } from "@/stores";
+import {
+  useSessionsStore,
+  type MessageReplyRef,
+  type MessageAttachment,
+} from "@/stores";
 
 export interface GroupSendResult {
   sent: number;
@@ -39,8 +43,9 @@ export async function sendGroupMessage(params: {
   content: string;
   timestamp: number;
   replyTo?: MessageReplyRef;
+  attachment?: MessageAttachment;
 }): Promise<GroupSendResult> {
-  const { group, senderId, content, timestamp, replyTo } = params;
+  const { group, senderId, content, timestamp, replyTo, attachment } = params;
 
   const recipients = group.members.filter((m) => m.user_id !== senderId);
 
@@ -49,6 +54,7 @@ export async function sendGroupMessage(params: {
     timestamp,
     groupId: group.id,
     ...(replyTo ? { replyTo } : {}),
+    ...(attachment ? { attachment } : {}),
   });
   const plaintextBytes = new TextEncoder().encode(plaintext);
 
