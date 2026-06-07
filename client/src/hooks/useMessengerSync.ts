@@ -967,7 +967,27 @@ export function useMessengerSync() {
       const data = rawData as {
         senderId: string;
         messageIds: string[];
+        groupId?: string;
       };
+
+      // Group read receipt: aggregate per-message reads; a message flips to
+      // "read" once every recipient has acknowledged it.
+      if (data.groupId) {
+        const group = useGroupsStore
+          .getState()
+          .groups.find((g) => g.id === data.groupId);
+        if (!group) return;
+        const recipientCount = Math.max(group.members.length - 1, 0);
+        useGroupsStore
+          .getState()
+          .recordGroupReads(
+            data.groupId,
+            data.messageIds,
+            data.senderId,
+            recipientCount,
+          );
+        return;
+      }
 
       const chats = useChatsStore.getState().chats;
 

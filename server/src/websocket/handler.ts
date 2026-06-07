@@ -247,7 +247,9 @@ export function initWebSocket(wss: WebSocketServer): void {
 
 function handleTyping(senderId: string, senderUsername: string, message: TypingMessage): void {
   const now = Date.now()
-  const key = `${senderId}|${message.recipientId}`
+  // Scope the rate-limit key by group so a group fan-out and a 1:1 typing event
+  // to the same recipient do not suppress each other.
+  const key = `${senderId}|${message.recipientId}|${message.groupId ?? ''}`
   const prev = typingRateLimits.get(key)
   if (prev) {
     if (prev.state === message.isTyping && now - prev.lastAt < 800) {
@@ -264,6 +266,7 @@ function handleTyping(senderId: string, senderUsername: string, message: TypingM
     senderId,
     senderUsername,
     isTyping: message.isTyping,
+    ...(message.groupId ? { groupId: message.groupId } : {}),
   })
 }
 
@@ -278,6 +281,7 @@ function handleReadReceipt(senderId: string, message: ReadReceiptMessage): void 
     type: 'read',
     senderId,
     messageIds: ids,
+    ...(message.groupId ? { groupId: message.groupId } : {}),
   })
 }
 

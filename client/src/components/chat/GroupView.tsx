@@ -7,9 +7,11 @@ import type { GroupData } from "@/lib/api";
 import {
   useAuthStore,
   useGroupsStore,
+  useTypingStore,
   type Message,
   type MessageAttachment,
 } from "@/stores";
+import { wsClient } from "@/lib/websocket";
 import { Button } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
 import { MessageBubbleMemo } from "./MessageBubble";
@@ -61,6 +63,11 @@ export default function GroupView({ group }: GroupViewProps) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingStateRef = useRef(false);
+  const sentReceiptsRef = useRef<Set<string>>(new Set());
+
+  const groupTyping = useTypingStore((s) => s.groupTypingUsers[group.id]);
 
   const currentMember = group.members.find((m) => m.user_id === userId);
   const isAdmin = currentMember?.role === "admin";
@@ -79,9 +86,100 @@ export default function GroupView({ group }: GroupViewProps) {
     markGroupRead(group.id);
   }, [group.id, groupMessages.length, markGroupRead]);
 
+  // While the group is open, send read receipts to the senders of incoming
+  // messages (grouped per sender, tagged with groupId). The ref dedupes within
+  // a mount; re-sending on reopen is idempotent on the sender side.
+  useEffect(() => {
+    if (mode !== "chat" || !userId) return;
+    const bySender = new Map<string, string[]>();
+    for (const m of groupMessages) {
+      if (m.senderId === userId || sentReceiptsRef.current.has(m.id)) continue;
+      sentReceiptsRef.current.add(m.id);
+      const ids = bySender.get(m.senderId) ?? [];
+      ids.push(m.id);
+      bySender.set(m.senderId, ids);
+    }
+    for (const [senderId, ids] of bySender) {
+      wsClient.sendReadReceipt(senderId, ids, group.id);
+    }
+  }, [groupMessages, mode, userId, group.id]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
   }, [groupMessages.length]);
+
+  // Fan out typing indicators to each member, tagged with the groupId so the
+  // recipient attributes it to the group rather than the 1:1 chat.
+  const broadcastTyping = useCallback(
+    (isTyping: boolean) => {
+      if (!userId) return;
+      for (const m of group.members) {
+        if (m.user_id !== userId) {
+          wsClient.sendTyping(m.user_id, isTyping, group.id);
+        }
+      }
+    },
+    [group.members, group.id, userId],
+  );
+
+  useEffect(() => {
+    const isTypingNow = messageText.trim().length > 0;
+
+    if (!isTypingNow) {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+      if (typingStateRef.current) {
+        typingStateRef.current = false;
+        broadcastTyping(false);
+      }
+      return;
+    }
+
+    if (!typingStateRef.current) {
+      typingStateRef.current = true;
+      broadcastTyping(true);
+    }
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      typingTimeoutRef.current = null;
+      if (typingStateRef.current) {
+        typingStateRef.current = false;
+        broadcastTyping(false);
+      }
+    }, 1200);
+  }, [messageText, broadcastTyping]);
+
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+      if (typingStateRef.current) {
+        typingStateRef.current = false;
+        broadcastTyping(false);
+      }
+    };
+  }, [broadcastTyping]);
+
+  const typingNames = useMemo(() => {
+    if (!groupTyping) return [];
+    return Object.keys(groupTyping)
+      .filter((id) => groupTyping[id] && id !== userId)
+      .map((id) => usernameById[id])
+      .filter((name): name is string => Boolean(name));
+  }, [groupTyping, userId, usernameById]);
+
+  const typingLabel = useMemo(() => {
+    if (typingNames.length === 0) return null;
+    if (typingNames.length === 1) return `@${typingNames[0]} is typing…`;
+    if (typingNames.length === 2)
+      return `@${typingNames[0]} and @${typingNames[1]} are typing…`;
+    return "Several people are typing…";
+  }, [typingNames]);
 
   const handleDeleteMessage = useCallback(
     (messageId: string) => {
@@ -363,6 +461,12 @@ export default function GroupView({ group }: GroupViewProps) {
               </>
             )}
           </main>
+
+          {typingLabel && (
+            <div className="px-5 pb-1 text-[11px] text-[var(--text-muted)] italic">
+              {typingLabel}
+            </div>
+          )}
 
           {/* Input */}
           <footer className="px-3 sm:px-5 md:px-6 py-3 sm:py-4 border-t border-[var(--border)]/70">

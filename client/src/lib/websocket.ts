@@ -161,28 +161,35 @@ class WebSocketClient {
                 break;
 
             case 'typing': {
-                // Update global typing store so any component can react
+                // Update global typing store so any component can react. A groupId
+                // attributes the event to a group rather than the 1:1 chat.
                 const senderId = data.senderId as string | undefined;
                 const isTypingNow = data.isTyping as boolean | undefined;
+                const groupId = data.groupId as string | undefined;
                 if (senderId && typeof isTypingNow === 'boolean') {
-                    useTypingStore.getState().setTyping(senderId, isTypingNow);
+                    const timerKey = groupId ? `${groupId}|${senderId}` : senderId;
+                    const applyTyping = (value: boolean) => {
+                        if (groupId) {
+                            useTypingStore.getState().setGroupTyping(groupId, senderId, value);
+                        } else {
+                            useTypingStore.getState().setTyping(senderId, value);
+                        }
+                    };
+                    applyTyping(isTypingNow);
 
-                    // Clear previous timer for this sender
-                    const prevTimer = this.typingTimers.get(senderId);
+                    // Clear previous timer for this sender/group
+                    const prevTimer = this.typingTimers.get(timerKey);
                     if (prevTimer) clearTimeout(prevTimer);
 
                     // Auto-clear typing after 5s if no update received
                     if (isTypingNow) {
                         const timer = setTimeout(() => {
-                            this.typingTimers.delete(senderId);
-                            const current = useTypingStore.getState().typingUsers[senderId];
-                            if (current) {
-                                useTypingStore.getState().setTyping(senderId, false);
-                            }
+                            this.typingTimers.delete(timerKey);
+                            applyTyping(false);
                         }, 5000);
-                        this.typingTimers.set(senderId, timer);
+                        this.typingTimers.set(timerKey, timer);
                     } else {
-                        this.typingTimers.delete(senderId);
+                        this.typingTimers.delete(timerKey);
                     }
                 }
                 break;
@@ -214,34 +221,43 @@ class WebSocketClient {
     /**
      * Отправляет индикатор набора
      */
-    sendTyping(recipientId: string, isTyping: boolean): void {
-        this.send({ type: 'typing', recipientId, isTyping });
+    sendTyping(recipientId: string, isTyping: boolean, groupId?: string): void {
+        this.send({ type: 'typing', recipientId, isTyping, ...(groupId ? { groupId } : {}) });
     }
 
     /**
      * Отправляет подтверждение прочтения.
-     * Batches receipts per recipient over 100ms to reduce WS traffic.
+     * Batches receipts per recipient (and group) over 100ms to reduce WS traffic.
      */
-    private readReceiptBatch: Map<string, { ids: Set<string>; timer: ReturnType<typeof setTimeout> }> = new Map();
+    private readReceiptBatch: Map<
+        string,
+        { recipientId: string; groupId?: string; ids: Set<string>; timer: ReturnType<typeof setTimeout> }
+    > = new Map();
 
-    sendReadReceipt(recipientId: string, messageIds: string[]): void {
+    sendReadReceipt(recipientId: string, messageIds: string[], groupId?: string): void {
         if (messageIds.length === 0) return;
 
-        let batch = this.readReceiptBatch.get(recipientId);
+        const key = `${recipientId}|${groupId ?? ''}`;
+        let batch = this.readReceiptBatch.get(key);
         if (!batch) {
-            batch = { ids: new Set(), timer: setTimeout(() => this.flushReadReceipts(recipientId), 100) };
-            this.readReceiptBatch.set(recipientId, batch);
+            batch = { recipientId, groupId, ids: new Set(), timer: setTimeout(() => this.flushReadReceipts(key), 100) };
+            this.readReceiptBatch.set(key, batch);
         }
         for (const id of messageIds) {
             batch.ids.add(id);
         }
     }
 
-    private flushReadReceipts(recipientId: string): void {
-        const batch = this.readReceiptBatch.get(recipientId);
+    private flushReadReceipts(key: string): void {
+        const batch = this.readReceiptBatch.get(key);
         if (!batch || batch.ids.size === 0) return;
-        this.readReceiptBatch.delete(recipientId);
-        this.send({ type: 'read', recipientId, messageIds: [...batch.ids] });
+        this.readReceiptBatch.delete(key);
+        this.send({
+            type: 'read',
+            recipientId: batch.recipientId,
+            messageIds: [...batch.ids],
+            ...(batch.groupId ? { groupId: batch.groupId } : {}),
+        });
     }
 
     /**

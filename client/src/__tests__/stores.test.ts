@@ -16,6 +16,7 @@ import {
   type Chat,
   type Message,
 } from '@/stores';
+import { useGroupsStore } from '@/stores/groups';
 import { generateIdentityKeys, generateExchangeKeyPair } from '@/crypto/keys';
 import type { Contact } from '@/crypto/storage';
 
@@ -478,6 +479,25 @@ describe('useTypingStore', () => {
     useTypingStore.getState().clearAll();
     expect(useTypingStore.getState().typingUsers).toEqual({});
   });
+
+  it('setGroupTyping tracks members per group', () => {
+    useTypingStore.getState().setGroupTyping('g1', 'u1', true);
+    expect(useTypingStore.getState().groupTypingUsers['g1']?.['u1']).toBe(true);
+  });
+
+  it('setGroupTyping false removes the member', () => {
+    useTypingStore.getState().setGroupTyping('g1', 'u1', true);
+    useTypingStore.getState().setGroupTyping('g1', 'u1', false);
+    expect(
+      useTypingStore.getState().groupTypingUsers['g1']?.['u1'],
+    ).toBeUndefined();
+  });
+
+  it('clearAll also clears group typing', () => {
+    useTypingStore.getState().setGroupTyping('g1', 'u1', true);
+    useTypingStore.getState().clearAll();
+    expect(useTypingStore.getState().groupTypingUsers).toEqual({});
+  });
 });
 
 // ── useSessionsStore ─────────────────────────────────────────────────────────
@@ -526,5 +546,49 @@ describe('useSessionsStore', () => {
     const before = useSessionsStore.getState().sessionContactIds;
     useSessionsStore.getState().deleteSession('nonexistent');
     expect(useSessionsStore.getState().sessionContactIds).toEqual(before);
+  });
+});
+
+// ── useGroupsStore — recordGroupReads ────────────────────────────────────────
+
+describe('useGroupsStore — recordGroupReads', () => {
+  beforeEach(() => {
+    useGroupsStore.setState({
+      groups: [],
+      activeGroupId: null,
+      messagesByGroup: {},
+      unreadByGroup: {},
+      readsByGroup: {},
+    });
+  });
+
+  it('marks an outgoing message read only after all recipients ack', () => {
+    useGroupsStore
+      .getState()
+      .addGroupMessage('g1', makeMessage('m1', 'g1', { status: 'sent' }));
+
+    useGroupsStore.getState().recordGroupReads('g1', ['m1'], 'r1', 2);
+    expect(useGroupsStore.getState().messagesByGroup['g1']?.[0]?.status).toBe(
+      'sent',
+    );
+
+    useGroupsStore.getState().recordGroupReads('g1', ['m1'], 'r2', 2);
+    expect(useGroupsStore.getState().messagesByGroup['g1']?.[0]?.status).toBe(
+      'read',
+    );
+  });
+
+  it('dedupes the same reader and does not over-count', () => {
+    useGroupsStore
+      .getState()
+      .addGroupMessage('g1', makeMessage('m1', 'g1', { status: 'sent' }));
+
+    useGroupsStore.getState().recordGroupReads('g1', ['m1'], 'r1', 2);
+    useGroupsStore.getState().recordGroupReads('g1', ['m1'], 'r1', 2);
+
+    expect(useGroupsStore.getState().readsByGroup['g1']?.['m1']).toEqual(['r1']);
+    expect(useGroupsStore.getState().messagesByGroup['g1']?.[0]?.status).toBe(
+      'sent',
+    );
   });
 });
