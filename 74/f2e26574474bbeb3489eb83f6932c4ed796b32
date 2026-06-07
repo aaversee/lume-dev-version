@@ -1,0 +1,45 @@
+client/src/stores/groups.ts
+  s_5a7e53f7a98baa::t_6b3414e55fb5b6 20-21
+  s_5a7e53f7a98baa::t_b8e4340c00e016 72-73,79
+  s_5a7e53f7a98baa::t_00a8f9721d984b 42-47,55
+  s_5a7e53f7a98baa::t_a80b0ef2e359e6 142-183
+server/src/websocket/handler.ts
+  s_5a7e53f7a98baa::t_c447dcfa701f8e 250-252,269
+  s_5a7e53f7a98baa::t_3e742e54bd642d 284
+client/src/hooks/useMessengerSync.ts
+  s_5a7e53f7a98baa::t_68e809ce7f6408 970,973-990
+client/src/components/chat/GroupView.tsx
+  s_5a7e53f7a98baa::t_7582706419e8bc 10,14
+  s_5a7e53f7a98baa::t_a185b6495700b6 68
+  s_5a7e53f7a98baa::t_f7e65e03216352 111-183
+  s_5a7e53f7a98baa::t_6e2b94a2d6ca6c 465-470
+  s_5a7e53f7a98baa::t_bb9cada4dc01d5 66-67,69-70
+  s_5a7e53f7a98baa::t_9ebe4bb43aee7b 89-106
+server/src/schemas/websocket.ts
+  s_5a7e53f7a98baa::t_31ba15b4da4481 11-14,21-22
+client/src/stores/index.ts
+  s_5a7e53f7a98baa::t_9a1aaeb1cc18a8 438-439,442-446,452,465-487
+client/src/__tests__/stores.test.ts
+  s_5a7e53f7a98baa::t_11ab3d47fd0b3f 19
+  s_5a7e53f7a98baa::t_d90214b87c294a 482-500
+  s_5a7e53f7a98baa::t_2501b45cfce335 551-594
+client/src/lib/websocket.ts
+  s_5a7e53f7a98baa::t_27f175413abf09 224-225,230,232-235,237,240-241,243-244,251-252,254-260
+  s_5a7e53f7a98baa::t_e6c9f1de4afb56 164-165,168,170-178,180-181,187-188,190,192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "74f2e26574474bbeb3489eb83f6932c4ed796b32",
+  "prompts": {},
+  "sessions": {
+    "s_5a7e53f7a98baa": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0bf07eb7-0f49-41f5-8889-d9e9e0db810d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "rekonov <rekonov@users.noreply.github.com>"
+    }
+  }
+}
