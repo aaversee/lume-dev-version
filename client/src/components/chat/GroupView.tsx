@@ -2,15 +2,35 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { groupsApi } from "@/lib/api";
+import { groupsApi, filesApi } from "@/lib/api";
 import type { GroupData } from "@/lib/api";
-import { useAuthStore, useGroupsStore, type Message } from "@/stores";
+import {
+  useAuthStore,
+  useGroupsStore,
+  useTypingStore,
+  type Message,
+  type MessageAttachment,
+} from "@/stores";
+import { wsClient } from "@/lib/websocket";
 import { Button } from "@/components/ui";
 import { Avatar } from "@/components/ui/Avatar";
 import { MessageBubbleMemo } from "./MessageBubble";
+import { TIMER_OPTIONS, formatTimerLabel } from "./chatUtils";
 import { vaultHasKeys } from "@/crypto/keyVault";
 import { sendGroupMessage } from "@/lib/groupMessaging";
+import {
+  encryptFile,
+  readFileAsUint8Array,
+  isImageMime,
+  formatFileSize,
+  MAX_FILE_SIZE,
+} from "@/lib/fileEncryption";
 import AddMemberModal from "@/components/modals/AddMemberModal";
+
+interface PendingAttachment {
+  file: File;
+  preview?: string;
+}
 
 interface GroupViewProps {
   group: GroupData;
@@ -31,6 +51,10 @@ export default function GroupView({ group }: GroupViewProps) {
   const [messageText, setMessageText] = useState("");
   const [sending, setSending] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [pendingAttachment, setPendingAttachment] =
+    useState<PendingAttachment | null>(null);
+  const [selfDestructTime, setSelfDestructTime] = useState<number | null>(null);
+  const [showOptions, setShowOptions] = useState(false);
 
   const [showAddMember, setShowAddMember] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -38,6 +62,12 @@ export default function GroupView({ group }: GroupViewProps) {
   const [error, setError] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingStateRef = useRef(false);
+  const sentReceiptsRef = useRef<Set<string>>(new Set());
+
+  const groupTyping = useTypingStore((s) => s.groupTypingUsers[group.id]);
 
   const currentMember = group.members.find((m) => m.user_id === userId);
   const isAdmin = currentMember?.role === "admin";
@@ -56,9 +86,100 @@ export default function GroupView({ group }: GroupViewProps) {
     markGroupRead(group.id);
   }, [group.id, groupMessages.length, markGroupRead]);
 
+  // While the group is open, send read receipts to the senders of incoming
+  // messages (grouped per sender, tagged with groupId). The ref dedupes within
+  // a mount; re-sending on reopen is idempotent on the sender side.
+  useEffect(() => {
+    if (mode !== "chat" || !userId) return;
+    const bySender = new Map<string, string[]>();
+    for (const m of groupMessages) {
+      if (m.senderId === userId || sentReceiptsRef.current.has(m.id)) continue;
+      sentReceiptsRef.current.add(m.id);
+      const ids = bySender.get(m.senderId) ?? [];
+      ids.push(m.id);
+      bySender.set(m.senderId, ids);
+    }
+    for (const [senderId, ids] of bySender) {
+      wsClient.sendReadReceipt(senderId, ids, group.id);
+    }
+  }, [groupMessages, mode, userId, group.id]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
   }, [groupMessages.length]);
+
+  // Fan out typing indicators to each member, tagged with the groupId so the
+  // recipient attributes it to the group rather than the 1:1 chat.
+  const broadcastTyping = useCallback(
+    (isTyping: boolean) => {
+      if (!userId) return;
+      for (const m of group.members) {
+        if (m.user_id !== userId) {
+          wsClient.sendTyping(m.user_id, isTyping, group.id);
+        }
+      }
+    },
+    [group.members, group.id, userId],
+  );
+
+  useEffect(() => {
+    const isTypingNow = messageText.trim().length > 0;
+
+    if (!isTypingNow) {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+      if (typingStateRef.current) {
+        typingStateRef.current = false;
+        broadcastTyping(false);
+      }
+      return;
+    }
+
+    if (!typingStateRef.current) {
+      typingStateRef.current = true;
+      broadcastTyping(true);
+    }
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      typingTimeoutRef.current = null;
+      if (typingStateRef.current) {
+        typingStateRef.current = false;
+        broadcastTyping(false);
+      }
+    }, 1200);
+  }, [messageText, broadcastTyping]);
+
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+      if (typingStateRef.current) {
+        typingStateRef.current = false;
+        broadcastTyping(false);
+      }
+    };
+  }, [broadcastTyping]);
+
+  const typingNames = useMemo(() => {
+    if (!groupTyping) return [];
+    return Object.keys(groupTyping)
+      .filter((id) => groupTyping[id] && id !== userId)
+      .map((id) => usernameById[id])
+      .filter((name): name is string => Boolean(name));
+  }, [groupTyping, userId, usernameById]);
+
+  const typingLabel = useMemo(() => {
+    if (typingNames.length === 0) return null;
+    if (typingNames.length === 1) return `@${typingNames[0]} is typing…`;
+    if (typingNames.length === 2)
+      return `@${typingNames[0]} and @${typingNames[1]} are typing…`;
+    return "Several people are typing…";
+  }, [typingNames]);
 
   const handleDeleteMessage = useCallback(
     (messageId: string) => {
@@ -71,9 +192,43 @@ export default function GroupView({ group }: GroupViewProps) {
     setReplyingTo(message);
   }, []);
 
+  const handleAttach = useCallback((file: File) => {
+    if (file.size > MAX_FILE_SIZE) {
+      alert(`File too large. Max size: ${formatFileSize(MAX_FILE_SIZE)}`);
+      return;
+    }
+    const preview = file.type.startsWith("image/")
+      ? URL.createObjectURL(file)
+      : undefined;
+    setPendingAttachment((prev) => {
+      if (prev?.preview) URL.revokeObjectURL(prev.preview);
+      return { file, preview };
+    });
+  }, []);
+
+  const handleCancelAttachment = useCallback(() => {
+    setPendingAttachment((prev) => {
+      if (prev?.preview) URL.revokeObjectURL(prev.preview);
+      return null;
+    });
+  }, []);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleAttach(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const handleSend = async () => {
     const text = messageText.trim();
-    if (!text || !userId || !hasMembersToSend || !vaultHasKeys()) return;
+    const hasAttachment = !!pendingAttachment;
+    if (
+      (!text && !hasAttachment) ||
+      !userId ||
+      !hasMembersToSend ||
+      !vaultHasKeys()
+    )
+      return;
 
     setSending(true);
     const messageId = uuidv4();
@@ -86,19 +241,62 @@ export default function GroupView({ group }: GroupViewProps) {
         }
       : undefined;
 
+    // Encrypt and upload the attachment once; the symmetric key travels to each
+    // member inside their own ratchet-encrypted payload, so the server only ever
+    // stores a single opaque blob.
+    let attachmentMeta: MessageAttachment | undefined;
+    if (pendingAttachment) {
+      try {
+        const fileData = await readFileAsUint8Array(pendingAttachment.file);
+        const encrypted = await encryptFile(
+          fileData,
+          pendingAttachment.file.type,
+          pendingAttachment.file.name,
+        );
+        const { data: uploadResult, error: uploadError } =
+          await filesApi.upload(encrypted.ciphertext, encrypted.mimeType);
+        if (uploadError || !uploadResult) {
+          throw new Error(uploadError || "File upload failed");
+        }
+        attachmentMeta = {
+          fileId: uploadResult.fileId,
+          fileName: encrypted.fileName,
+          mimeType: encrypted.mimeType,
+          size: encrypted.originalSize,
+          key: encrypted.key,
+          nonce: encrypted.nonce,
+        };
+      } catch {
+        setSending(false);
+        return;
+      }
+    }
+
+    const msgType = attachmentMeta
+      ? isImageMime(attachmentMeta.mimeType)
+        ? "image"
+        : "file"
+      : "text";
+
     // Optimistic local echo
     addGroupMessage(group.id, {
       id: messageId,
       chatId: group.id,
       senderId: userId,
       content: text,
-      type: "text",
+      type: msgType,
       timestamp,
       status: "sending",
+      selfDestructAt: selfDestructTime
+        ? timestamp + selfDestructTime * 1000
+        : undefined,
       replyTo: replyRef,
+      attachment: attachmentMeta,
     });
     setMessageText("");
     setReplyingTo(null);
+    if (pendingAttachment?.preview) URL.revokeObjectURL(pendingAttachment.preview);
+    setPendingAttachment(null);
 
     try {
       const result = await sendGroupMessage({
@@ -107,6 +305,8 @@ export default function GroupView({ group }: GroupViewProps) {
         content: text,
         timestamp,
         replyTo: replyRef,
+        attachment: attachmentMeta,
+        selfDestructSeconds: selfDestructTime,
       });
       updateGroupMessage(group.id, messageId, {
         status: result.sent > 0 ? "sent" : "failed",
@@ -262,8 +462,51 @@ export default function GroupView({ group }: GroupViewProps) {
             )}
           </main>
 
+          {typingLabel && (
+            <div className="px-5 pb-1 text-[11px] text-[var(--text-muted)] italic">
+              {typingLabel}
+            </div>
+          )}
+
           {/* Input */}
           <footer className="px-3 sm:px-5 md:px-6 py-3 sm:py-4 border-t border-[var(--border)]/70">
+            {pendingAttachment && (
+              <div className="mb-3 flex items-center gap-3 px-4 py-2.5 rounded-[var(--radius-md)] bg-[var(--surface-alt)] border border-[var(--border)]">
+                {pendingAttachment.preview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={pendingAttachment.preview}
+                    alt="Attachment preview"
+                    className="w-12 h-12 rounded object-cover"
+                  />
+                ) : (
+                  <div className="w-12 h-12 rounded bg-[var(--surface-strong)] flex items-center justify-center">
+                    <svg className="w-6 h-6 text-[var(--text-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M14 2v6h6" />
+                    </svg>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-semibold text-[var(--text-primary)] truncate">
+                    {pendingAttachment.file.name}
+                  </p>
+                  <p className="text-[11px] text-[var(--text-muted)]">
+                    {formatFileSize(pendingAttachment.file.size)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCancelAttachment}
+                  className="flex-shrink-0 p-1 rounded-full hover:bg-[var(--surface-strong)] transition-colors"
+                  aria-label="Remove attachment"
+                >
+                  <svg className="w-4 h-4 text-[var(--text-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
             {replyingTo && (
               <div className="mb-3 flex items-start gap-3 px-4 py-2.5 rounded-[var(--radius-md)] bg-[var(--surface-alt)] border border-[var(--border)]">
                 <div className="flex-1 min-w-0 pl-3 border-l-2 border-[var(--accent)]">
@@ -290,6 +533,32 @@ export default function GroupView({ group }: GroupViewProps) {
                 </button>
               </div>
             )}
+            {showOptions && (
+              <div className="mb-3 px-1">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                  Auto-delete
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {TIMER_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.label}
+                      type="button"
+                      onClick={() => {
+                        setSelfDestructTime(opt.value);
+                        setShowOptions(false);
+                      }}
+                      className={`px-3 py-1.5 rounded-full border text-[12px] transition-colors ${
+                        selfDestructTime === opt.value
+                          ? "bg-[var(--accent)]/15 border-[var(--accent)]/40 text-[var(--accent)]"
+                          : "bg-[var(--surface-strong)] border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex items-end gap-3">
               <div className="flex-1">
                 <textarea
@@ -305,10 +574,55 @@ export default function GroupView({ group }: GroupViewProps) {
                   style={{ minHeight: "48px", maxHeight: "140px" }}
                 />
               </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={handleFileSelect}
+                accept="image/*,.pdf,.doc,.docx,.txt,.zip"
+                className="hidden"
+                aria-hidden="true"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!hasMembersToSend}
+                className="w-12 h-12 rounded-full bg-[var(--surface-strong)] border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center flex-shrink-0"
+                aria-label="Attach file"
+                title="Attach file"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowOptions((v) => !v)}
+                disabled={!hasMembersToSend}
+                className={`w-12 h-12 rounded-full border transition-colors inline-flex items-center justify-center flex-shrink-0 disabled:opacity-60 disabled:cursor-not-allowed ${
+                  selfDestructTime
+                    ? "bg-[var(--accent)]/15 border-[var(--accent)]/40 text-[var(--accent)]"
+                    : "bg-[var(--surface-strong)] border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                }`}
+                aria-label="Self-destruct timer"
+                title={
+                  selfDestructTime
+                    ? `Auto-delete: ${formatTimerLabel(selfDestructTime)}`
+                    : "Self-destruct timer"
+                }
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v5l3 2" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </button>
               <button
                 type="button"
                 onClick={() => void handleSend()}
-                disabled={!messageText.trim() || sending || !hasMembersToSend}
+                disabled={
+                  (!messageText.trim() && !pendingAttachment) ||
+                  sending ||
+                  !hasMembersToSend
+                }
                 className="w-12 h-12 rounded-full bg-[var(--accent)] text-[var(--accent-contrast)] border border-[var(--border)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center flex-shrink-0 shadow-[var(--shadow-sm)]"
                 aria-label="Send"
                 title="Send"
@@ -322,6 +636,13 @@ export default function GroupView({ group }: GroupViewProps) {
                 )}
               </button>
             </div>
+            {selfDestructTime ? (
+              <div className="mt-2 text-center">
+                <span className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                  Auto-delete in {formatTimerLabel(selfDestructTime)}
+                </span>
+              </div>
+            ) : null}
           </footer>
         </>
       ) : (
